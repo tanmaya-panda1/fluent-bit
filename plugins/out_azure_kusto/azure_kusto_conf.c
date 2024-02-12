@@ -2,7 +2,7 @@
 
 /*  Fluent Bit
  *  ==========
- *  Copyright (C) 2015-2022 The Fluent Bit Authors
+ *  Copyright (C) 2015-2024 The Fluent Bit Authors
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -199,10 +199,9 @@ static int parse_storage_resources(struct flb_azure_kusto *ctx, struct flb_confi
     }
 
     jsmn_init(&parser);
-
     //tokens = flb_calloc(1, sizeof(jsmntok_t) * tok_size);
 
-    // Dynamically allocate memory for tokens based on response length
+    /* Dynamically allocate memory for tokens based on response length */
     tokens = flb_calloc(1, sizeof(jsmntok_t) * (flb_sds_len(response)));
 
     if (tokens) {
@@ -420,7 +419,7 @@ static flb_sds_t parse_ingestion_identity_token(struct flb_azure_kusto *ctx,
     return identity_token;
 }
 
-				                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
+
 
 int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
                                          struct flb_config *config)
@@ -452,7 +451,7 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
                 blob_ha = flb_upstream_ha_create("azure_kusto_blob_ha");
 
                 if (blob_ha) {
-			
+
                     if (pthread_mutex_lock(&ctx->resources_mutex)) {
                         flb_plg_error(ctx->ins, "error locking mutex");
                         return -1;
