@@ -2,7 +2,7 @@
 
 /*  Fluent Bit
  *  ==========
- *  Copyright (C) 2015-2022 The Fluent Bit Authors
+ *  Copyright (C) 2015-2024 The Fluent Bit Authors
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -1198,6 +1198,18 @@ int flb_output_init_all(struct flb_config *config)
         cmt_gauge_set(ins->cmt_upstream_busy_connections,
                       ts,
                       0,
+                      1, (char *[]) {name});
+
+        /* output_chunk_available_capacity_percent */
+        ins->cmt_chunk_available_capacity_percent = cmt_gauge_create(ins->cmt,
+                                                        "fluentbit",
+                                                        "output",
+                                                        "chunk_available_capacity_percent",
+                                                        "Available chunk capacity (percent)",
+                                                        1, (char *[]) {"name"});
+        cmt_gauge_set(ins->cmt_chunk_available_capacity_percent,
+                      ts,
+                      100.0,
                       1, (char *[]) {name});
 
         /* old API */
