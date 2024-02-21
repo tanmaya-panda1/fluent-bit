@@ -455,12 +455,12 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
     /* check if we have all resources and they are not stale */
     if (ctx->resources->blob_ha && ctx->resources->queue_ha &&
         ctx->resources->identity_token &&
-        now - ctx->resources->load_time < FLB_AZURE_KUSTO_RESOURCES_LOAD_INTERVAL_SEC + generated_random_integer) {
+        now - ctx->resources->load_time < ctx->ingestion_resources_refresh_interval + generated_random_integer) {
         flb_plg_debug(ctx->ins, "resources are already loaded and are not stale");
         ret = 0;
     }
     else {
-        flb_plg_info(ctx->ins, "loading kusto ingestion resourcs and refresh interval is %d", ,FLB_AZURE_KUSTO_RESOURCES_LOAD_INTERVAL_SEC + generated_random_integer);
+        flb_plg_info(ctx->ins, "loading kusto ingestion resourcs and refresh interval is %d", ,ctx->ingestion_resources_refresh_interval + generated_random_integer);
         response = execute_ingest_csl_command(ctx, ".get ingestion resources");
 
         if (response) {

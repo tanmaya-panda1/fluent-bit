@@ -49,7 +49,7 @@
 #define AZURE_KUSTO_RESOURCE_UPSTREAM_URI "uri"
 #define AZURE_KUSTO_RESOURCE_UPSTREAM_SAS "sas"
 
-#define FLB_AZURE_KUSTO_RESOURCES_LOAD_INTERVAL_SEC 7200
+#define FLB_AZURE_KUSTO_RESOURCES_LOAD_INTERVAL_SEC "3600"
 
 #define FLB_AZURE_KUSTO_INGEST_ENDPOINT_CONNECTION_TIMEOUT "60"
 
@@ -77,6 +77,8 @@ struct flb_azure_kusto {
 
     /* compress payload */
     int compression_enabled;
+
+    int ingestion_resources_refresh_interval;
 
     /* records configuration */
     flb_sds_t log_key;
