@@ -26,6 +26,13 @@
 #include <fluent-bit/flb_sds.h>
 #include <fluent-bit/flb_upstream_ha.h>
 
+#include <fluent-bit/flb_scheduler.h>
+#include <fluent-bit/flb_utils.h>
+#include <fluent-bit/flb_time.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
 /* refresh token every 50 minutes */
 #define FLB_AZURE_KUSTO_TOKEN_REFRESH 3000
 
@@ -52,6 +59,10 @@
 #define FLB_AZURE_KUSTO_RESOURCES_LOAD_INTERVAL_SEC "3600"
 
 #define FLB_AZURE_KUSTO_INGEST_ENDPOINT_CONNECTION_TIMEOUT "60"
+
+#define FLB_AZURE_KUSTO_BUFFER_DIR_MAX_SIZE (1024 * 1024 * 1024)  // 1GB
+#define FLB_AZURE_KUSTO_BUFFER_MAX_FILE_SIZE (100 * 1024 * 1024)         // 100MB
+#define FLB_AZURE_KUSTO_BUFFER_MAX_FILE_WAIT_TIME (30 * 60)              // 30 minutes
 
 
 struct flb_azure_kusto_resources {
@@ -106,6 +117,14 @@ struct flb_azure_kusto {
 
     pthread_mutex_t blob_mutex;
 
+    char *buffer_dir;
+    struct mk_list buffer_files;
+    flb_sds_t current_file_path;
+    FILE *current_file;
+    size_t current_file_size;
+
+    int buffering_enabled;
+
     /* Upstream connection to the backend server */
     struct flb_upstream *u;
 
@@ -114,6 +133,32 @@ struct flb_azure_kusto {
 
     /* Plugin output instance reference */
     struct flb_output_instance *ins;
+};
+
+/*  Buffer file metadata
+ * This structure is used to store metadata about the buffer files that are
+ * created by the Azure Kusto plugin. This metadata is used to track the
+ * status of the buffer files and to determine if they are ready to be ingested into Azure Kusto
+ */
+struct flb_azure_buffer_file_metadata {
+
+    /* The path to the buffer file */
+    char *file_path;
+    /* The time the buffer file was created */
+    time_t created_time;
+    /* The time the buffer file was last modified */
+    time_t last_modified_time;
+    /* The size of the buffer file */
+    size_t file_size;
+    /* This indicates the failure status of the ingested file */
+    int failure_status;
+    flb_sds_t event_tag;
+    int tag_len;
+
+    /* This indicates whether the file is currently accessed */
+    int locked;
+
+    struct mk_list _head;
 };
 
 flb_sds_t get_azure_kusto_token(struct flb_azure_kusto *ctx);
