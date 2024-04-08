@@ -33,6 +33,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <fluent-bit/flb_sds.h>
+#include <fluent-bit/flb_fstore.h>
 
 #include "azure_kusto.h"
 #include "azure_kusto_conf.h"
@@ -287,9 +288,11 @@ static int ingest_to_kusto(struct flb_config *config, struct flb_sched_timer *ti
 static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_config *config,
                                void *data)
 {
+    int type;
     int io_flags = FLB_IO_TLS;
     struct flb_azure_kusto *ctx;
     struct flb_sched *sched;
+    struct flb_fstore *fs;
 
     flb_plg_debug(ins, "inside azure kusto init");
 
@@ -306,12 +309,19 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
     ctx->current_file_size = 0;
     ctx->ins = ins;
 
+    type = FLB_FSTORE_FS;
+
+    fs = flb_fstore_create(ctx->buffer_dir, type);
+    if (!fs) {
+        return -1;
+    }
+
     // Create buffer directory if it doesn't exist
-    if (mkdir(ctx->buffer_dir, 0755) == -1 && errno != EEXIST) {
+    /*if (mkdir(ctx->buffer_dir, 0755) == -1 && errno != EEXIST) {
         flb_plg_error(ins, "Failed to create buffer directory: %s", ctx->buffer_dir);
         flb_free(ctx);
         return -1;
-    }
+    }*/
 
     sched = flb_sched_ctx_get();
 

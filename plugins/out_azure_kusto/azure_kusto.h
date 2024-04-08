@@ -117,13 +117,23 @@ struct flb_azure_kusto {
 
     pthread_mutex_t blob_mutex;
 
-    char *buffer_dir;
     struct mk_list buffer_files;
     flb_sds_t current_file_path;
     FILE *current_file;
     size_t current_file_size;
 
     int buffering_enabled;
+
+    size_t store_dir_limit_size;
+    /* track the total amount of buffered data */
+    size_t current_buffer_size;
+    flb_sds_t buffer_dir;
+    char *store_dir;
+    struct flb_fstore *fs;
+    struct flb_fstore_stream *stream_active;  /* default active stream */
+    struct flb_fstore_stream *stream_upload;
+    struct flb_fstore_stream *stream_metadata; /* s3 metadata stream */
+
 
     /* Upstream connection to the backend server */
     struct flb_upstream *u;
