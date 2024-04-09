@@ -17,8 +17,8 @@
  *  limitations under the License.
  */
 
-#ifndef FLUENT_BIT_AZURE_KUSTO_STORE_H
-#define FLUENT_BIT_AZURE_KUSTO_STORE_H
+#ifndef FLB_OUT_AZURE_KUSTO_STORE_H
+#define FLB_OUT_AZURE_KUSTO_STORE_H
 
 
 #include <fluent-bit/flb_output_plugin.h>

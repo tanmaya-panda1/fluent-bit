@@ -62,7 +62,8 @@
 
 #define FLB_AZURE_KUSTO_BUFFER_DIR_MAX_SIZE (1024 * 1024 * 1024)  // 1GB
 #define FLB_AZURE_KUSTO_BUFFER_MAX_FILE_SIZE (100 * 1024 * 1024)         // 100MB
-#define FLB_AZURE_KUSTO_BUFFER_MAX_FILE_WAIT_TIME (30 * 60)              // 30 minutes
+#define FLB_AZURE_KUSTO_BUFFER_MAX_FILE_WAIT_TIME (30 * 60)
+#define MAX_UPLOAD_ERRORS 5// 30 minutes
 
 
 struct flb_azure_kusto_resources {
@@ -123,6 +124,11 @@ struct flb_azure_kusto {
     size_t current_file_size;
 
     int buffering_enabled;
+
+    size_t file_size;
+    size_t upload_chunk_size;
+    time_t upload_timeout;
+    time_t retry_time;
 
     size_t store_dir_limit_size;
     /* track the total amount of buffered data */

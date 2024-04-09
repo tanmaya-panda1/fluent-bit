@@ -34,10 +34,14 @@
 #include <stdio.h>
 #include <fluent-bit/flb_sds.h>
 #include <fluent-bit/flb_fstore.h>
+#include <fluent-bit/flb_log_event_decoder.h>
+#include <stdlib.h>
+#include <msgpack.h>
 
 #include "azure_kusto.h"
 #include "azure_kusto_conf.h"
 #include "azure_kusto_ingest.h"
+#include "azure_kusto_store.h"
 
 /* Create a new oauth2 context and get a oauth2 token */
 static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
@@ -228,6 +232,251 @@ flb_sds_t execute_ingest_csl_command(struct flb_azure_kusto *ctx, const char *cs
     }
 
     return resp;
+}
+
+/*
+ * return value is one of FLB_OK, FLB_RETRY, FLB_ERROR
+ *
+ * Chunk is allowed to be NULL
+ *//*
+static int upload_data(struct flb_azure_kusto *ctx, struct azure_kusto_file *chunk,
+                       char *body, size_t body_size,
+                       const char *tag, int tag_len)
+{
+    int init_upload = FLB_FALSE;
+    int complete_upload = FLB_FALSE;
+    int size_check = FLB_FALSE;
+    int part_num_check = FLB_FALSE;
+    int timeout_check = FLB_FALSE;
+    int ret;
+    void *payload_buf = NULL;
+    size_t payload_size = 0;
+    size_t preCompress_size = 0;
+    time_t file_first_log_time = time(NULL);
+
+    *//*
+     * When chunk does not exist, file_first_log_time will be the current time.
+     * This is only for unit tests and prevents unit tests from segfaulting when chunk is
+     * NULL because if so chunk->first_log_time will be NULl either and will cause
+     * segfault during the process of put_object upload or mutipart upload.
+     *//*
+    if (chunk != NULL) {
+        file_first_log_time = chunk->first_log_time;
+    }
+
+    if (ctx->compression_enabled == FLB_TRUE) {
+        *//* Map payload *//*
+        ret = flb_aws_compression_compress(ctx->compression, body, body_size, &payload_buf, &payload_size);
+        if (ret == -1) {
+            flb_plg_error(ctx->ins, "Failed to compress data");
+            return FLB_RETRY;
+        } else {
+            preCompress_size = body_size;
+            body = (void *) payload_buf;
+            body_size = payload_size;
+        }
+    }
+
+    if (ctx->use_put_object == FLB_TRUE) {
+        goto put_object;
+    }
+
+
+        if (chunk != NULL && time(NULL) >
+                             (chunk->create_time + ctx->upload_timeout + ctx->retry_time)) {
+            *//* timeout already reached, just PutObject *//*
+            goto put_object;
+        }
+        else if (body_size >= ctx->file_size) {
+            *//* already big enough, just use PutObject API *//*
+            goto put_object;
+        }
+        else {
+            if (ctx->use_put_object == FLB_FALSE && ctx->compression == FLB_AWS_COMPRESS_GZIP) {
+                flb_plg_info(ctx->ins, "Pre-compression upload_chunk_size= %zu, After compression, chunk is only %zu bytes, "
+                                       "the chunk was too small, using PutObject to upload", preCompress_size, body_size);
+            }
+            goto put_object;
+        }
+
+    put_object:
+
+    *//*
+     * remove chunk from buffer list
+     *//*
+    ret = s3_put_object(ctx, tag, file_first_log_time, body, body_size);
+    if (ctx->compression == FLB_AWS_COMPRESS_GZIP) {
+        flb_free(payload_buf);
+    }
+    if (ret < 0) {
+        *//* re-add chunk to list *//*
+        if (chunk) {
+            s3_store_file_unlock(chunk);
+            chunk->failures += 1;
+        }
+        return FLB_RETRY;
+    }
+
+    *//* data was sent successfully- delete the local buffer *//*
+    if (chunk) {
+        azure_kusto_store_file_delete(ctx, chunk);
+    }
+
+    return FLB_OK;
+}*/
+
+/*
+ * Either new_data or chunk can be NULL, but not both
+ */
+static int construct_request_buffer(struct flb_azure_kusto *ctx, flb_sds_t new_data,
+                                    struct azure_kusto_file *chunk,
+                                    char **out_buf, size_t *out_size)
+{
+    char *body;
+    char *tmp;
+    size_t body_size = 0;
+    char *buffered_data = NULL;
+    size_t buffer_size = 0;
+    int ret;
+
+    if (new_data == NULL && chunk == NULL) {
+        flb_plg_error(ctx->ins, "[construct_request_buffer] Something went wrong"
+                                " both chunk and new_data are NULL");
+        return -1;
+    }
+
+    if (chunk) {
+        ret = azure_kusto_store_file_read(ctx, chunk, &buffered_data, &buffer_size);
+        if (ret < 0) {
+            flb_plg_error(ctx->ins, "Could not read locally buffered data %s",
+                          chunk->file_path);
+            return -1;
+        }
+
+        /*
+         * lock the chunk from buffer list
+         */
+        azure_kusto_store_file_lock(chunk);
+        body = buffered_data;
+        body_size = buffer_size;
+    }
+
+    /*
+     * If new data is arriving, increase the original 'buffered_data' size
+     * to append the new one.
+     */
+    if (new_data) {
+        body_size += flb_sds_len(new_data);
+
+        tmp = flb_realloc(buffered_data, body_size + 1);
+        if (!tmp) {
+            flb_errno();
+            flb_free(buffered_data);
+            if (chunk) {
+                azure_kusto_store_file_unlock(chunk);
+            }
+            return -1;
+        }
+        body = buffered_data = tmp;
+        memcpy(body + buffer_size, new_data, flb_sds_len(new_data));
+        body[body_size] = '\0';
+    }
+
+    *out_buf = body;
+    *out_size = body_size;
+
+    return 0;
+}
+
+
+static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
+{
+    struct flb_azure_kusto *ctx = data;
+    struct azure_kusto_file *chunk = NULL;
+    struct flb_fstore_file *fsf;
+    char *buffer = NULL;
+    size_t buffer_size = 0;
+    struct mk_list *tmp;
+    struct mk_list *head;
+    int ret;
+    time_t now;
+    flb_sds_t payload;
+    flb_sds_t tag_sds;
+
+    flb_plg_debug(ctx->ins, "Running upload timer callback (cb_s3_upload)..");
+
+    now = time(NULL);
+
+    /* Check all chunks and see if any have timed out */
+    mk_list_foreach_safe(head, tmp, &ctx->stream_active->files) {
+        fsf = mk_list_entry(head, struct flb_fstore_file, _head);
+        chunk = fsf->data;
+
+        if (now < (chunk->create_time + ctx->upload_timeout + ctx->retry_time)) {
+            continue; /* Only send chunks which have timed out */
+        }
+
+        /* Locked chunks are being processed, skip */
+        if (chunk->locked == FLB_TRUE) {
+            continue;
+        }
+
+        ret = construct_request_buffer(ctx, NULL, chunk, &buffer, &buffer_size);
+        if (ret < 0) {
+            flb_plg_error(ctx->ins, "Could not construct request buffer for %s",
+                          chunk->file_path);
+            continue;
+        }
+
+        payload = flb_sds_create(buffer);
+        tag_sds = flb_sds_create(fsf->meta_buf);
+
+        ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), payload, flb_sds_len(payload));
+        if (ret != 0) {
+            flb_plg_error(ctx->ins, "Failed to ingest data to Azure Blob");
+        }
+
+        flb_free(buffer);
+        flb_sds_destroy(payload);
+        flb_sds_destroy(tag_sds);
+        if (ret != FLB_OK) {
+            flb_plg_error(ctx->ins, "Could not send chunk with tag %s",
+                          (char *) fsf->meta_buf);
+        }
+    }
+
+}
+
+// Timer callback to ingest data to Azure Kusto
+static int ingest_to_kusto_ext(void *out_context, flb_sds_t chunk,
+                               struct azure_kusto_file *upload_file,
+                               const char *tag, int tag_len)
+{
+    int ret;
+    char *buffer;
+    size_t buffer_size;
+    struct flb_azure_kusto *ctx = out_context;
+    flb_sds_t payload;
+    flb_sds_t tag_sds = flb_sds_create(tag);
+
+    /* Create buffer to upload to S3 */
+    ret = construct_request_buffer(ctx, chunk, upload_file, &buffer, &buffer_size);
+    flb_sds_destroy(chunk);
+    if (ret < 0) {
+        flb_plg_error(ctx->ins, "Could not construct request buffer for %s",
+                      upload_file->file_path);
+        return -1;
+    }
+
+    payload = flb_sds_create(buffer);
+
+    // Call azure_kusto_queued_ingestion to ingest the payload
+    ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), payload, flb_sds_len(payload));
+    if (ret != 0) {
+        flb_plg_error(ctx->ins, "Failed to ingest data to Azure Blob");
+    }
+
+    return 0;
 }
 
 
@@ -595,6 +844,24 @@ static void azure_kusto_flush_to_buffer(const void *data, size_t bytes, const ch
     }
 }
 
+static int buffer_chunk(void *out_context, struct azure_kusto_file *upload_file,
+                        flb_sds_t chunk, int chunk_size,
+                        const char *tag, int tag_len,
+                        time_t file_first_log_time)
+{
+    int ret;
+    struct flb_azure_kusto *ctx = out_context;
+
+    ret = azure_kusto_store_buffer_put(ctx, upload_file, tag,
+                              tag_len, chunk, (size_t) chunk_size, file_first_log_time);
+    flb_sds_destroy(chunk);
+    if (ret < 0) {
+        flb_plg_warn(ctx->ins, "Could not buffer chunk. ");
+        return -1;
+    }
+    return 0;
+}
+
 static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                  struct flb_output_flush *out_flush,
                                  struct flb_input_instance *i_ins, void *out_context,
@@ -606,6 +873,12 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
     size_t tag_len;
     struct flb_azure_kusto *ctx = out_context;
     int is_compressed = FLB_FALSE;
+    struct azure_kusto_file *upload_file = NULL;
+    struct flb_log_event_decoder log_decoder;
+    struct flb_log_event log_event;
+    time_t file_first_log_time = 0;
+    int upload_timeout_check = FLB_FALSE;
+    int total_file_size_check = FLB_FALSE;
 
     (void)i_ins;
     (void)config;
@@ -627,8 +900,91 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
     }
 
     if (ctx->buffering_enabled == FLB_TRUE) {
+
+        /* Get a file candidate matching the given 'tag' */
+        upload_file = azure_kusto_store_file_get(ctx,
+                                        event_chunk->tag,
+                                        flb_sds_len(event_chunk->tag));
+
+        if (upload_file == NULL) {
+            ret = flb_log_event_decoder_init(&log_decoder,
+                                             (char *) event_chunk->data,
+                                             event_chunk->size);
+
+            if (ret != FLB_EVENT_DECODER_SUCCESS) {
+                flb_plg_error(ctx->ins,
+                              "Log event decoder initialization error : %d", ret);
+
+                flb_sds_destroy(json);
+
+                FLB_OUTPUT_RETURN(FLB_ERROR);
+            }
+
+            while ((ret = flb_log_event_decoder_next(
+                    &log_decoder,
+                    &log_event)) == FLB_EVENT_DECODER_SUCCESS) {
+                if (log_event.timestamp.tm.tv_sec != 0) {
+                    file_first_log_time = log_event.timestamp.tm.tv_sec;
+                    break;
+                }
+            }
+
+            flb_log_event_decoder_destroy(&log_decoder);
+        }
+        else {
+            /* Get file_first_log_time from upload_file */
+            file_first_log_time = upload_file->first_log_time;
+        }
+
+        if (file_first_log_time == 0) {
+            file_first_log_time = time(NULL);
+        }
+
+        /* Discard upload_file if it has failed to upload MAX_UPLOAD_ERRORS times */
+        if (upload_file != NULL && upload_file->failures >= MAX_UPLOAD_ERRORS) {
+            flb_plg_warn(ctx->ins, "File with tag %s failed to send %d times, will not "
+                                   "retry", event_chunk->tag, MAX_UPLOAD_ERRORS);
+            azure_kusto_store_file_inactive(ctx, upload_file);
+            upload_file = NULL;
+        }
+
+        /* If upload_timeout has elapsed, upload file */
+        if (upload_file != NULL && time(NULL) >
+                                   (upload_file->create_time + ctx->upload_timeout)) {
+            upload_timeout_check = FLB_TRUE;
+            flb_plg_info(ctx->ins, "upload_timeout reached for %s",
+                         event_chunk->tag);
+        }
+
+        /* If total_file_size has been reached, upload file */
+        if (upload_file && upload_file->size + json_size > ctx->upload_chunk_size) {
+            total_file_size_check = FLB_TRUE;
+        }
+
+        /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
+        if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
+            /* Send upload directly without upload queue */
+            ret = ingest_to_kusto_ext(ctx, json, upload_file,
+                                      event_chunk->tag,
+                                      flb_sds_len(event_chunk->tag));
+            if (ret < 0) {
+                FLB_OUTPUT_RETURN(FLB_ERROR);
+            }
+            FLB_OUTPUT_RETURN(ret);
+        }
+
+        /* Buffer current chunk in filesystem and wait for next chunk from engine */
+        ret = buffer_chunk(ctx, upload_file, json, json_size,
+                           event_chunk->tag, flb_sds_len(event_chunk->tag),
+                           file_first_log_time);
+
+        if (ret < 0) {
+            FLB_OUTPUT_RETURN(FLB_RETRY);
+        }
+
+
         /* Buffering mode is enabled, call azure_kusto_flush_to_buffer */
-        azure_kusto_flush_to_buffer(json, json_size, event_chunk->tag, tag_len, i_ins, ctx, config);
+        //azure_kusto_flush_to_buffer(json, json_size, event_chunk->tag, tag_len, i_ins, ctx, config);
         flb_sds_destroy(json);
         FLB_OUTPUT_RETURN(FLB_OK);
     } else {
