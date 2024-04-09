@@ -901,6 +901,34 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
     if (ctx->buffering_enabled == FLB_TRUE) {
 
+        // Check if ctx is NULL
+        if (ctx) {
+            flb_plg_debug(ctx->ins, "ctx is not NULL");
+        } else {
+            flb_plg_error(ctx->ins, "ctx is NULL");
+        }
+
+// Check if event_chunk is NULL
+        if (event_chunk) {
+            flb_plg_debug(ctx->ins, "event_chunk is not NULL");
+        } else {
+            flb_plg_error(ctx->ins, "event_chunk is NULL");
+        }
+
+// Check if event_chunk->tag is NULL
+        if (event_chunk && event_chunk->tag) {
+            flb_plg_debug(ctx->ins, "event_chunk->tag is not NULL");
+        } else {
+            flb_plg_error(ctx->ins, "event_chunk->tag is NULL");
+        }
+
+// Check if event_chunk->size is zero
+        if (event_chunk && event_chunk->size > 0) {
+            flb_plg_debug(ctx->ins, "event_chunk->size is greater than zero");
+        } else {
+            flb_plg_error(ctx->ins, "event_chunk->size is zero or event_chunk is NULL");
+        }
+
         /* Get a file candidate matching the given 'tag' */
         upload_file = azure_kusto_store_file_get(ctx,
                                         event_chunk->tag,
