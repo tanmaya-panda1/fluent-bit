@@ -904,7 +904,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         /* Get a file candidate matching the given 'tag' */
         upload_file = azure_kusto_store_file_get(ctx,
                                         event_chunk->tag,
-                                        flb_sds_len(event_chunk->tag));
+                                        event_chunk->size);
 
         if (upload_file == NULL) {
             ret = flb_log_event_decoder_init(&log_decoder,
