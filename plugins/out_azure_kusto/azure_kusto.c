@@ -542,6 +542,7 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
     struct flb_azure_kusto *ctx;
     struct flb_sched *sched;
     struct flb_fstore *fs;
+    flb_sds_t tmp_sds;
 
     flb_plg_debug(ins, "inside azure kusto init");
 
@@ -553,11 +554,24 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
     }
 
     if (ctx->buffering_enabled == FLB_TRUE) {
-        mk_list_init(&ctx->buffer_files);
+        ctx->ins = ins;
+        ctx->retry_time = 0;
+
+        /* Initialize local storage */
+        int ret = azure_kusto_store_init(ctx);
+        if (ret == -1) {
+            flb_plg_error(ctx->ins, "Failed to initialize kusto storage: %s",
+                          ctx->store_dir);
+            return -1;
+        }
+
+        /*mk_list_init(&ctx->buffer_files);
         ctx->current_file_path = NULL;
         ctx->current_file = NULL;
         ctx->current_file_size = 0;
         ctx->ins = ins;
+
+        ctx->retry_time = 0;
 
         type = FLB_FSTORE_FS;
 
@@ -574,7 +588,7 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
             flb_plg_error(ins, "Failed to start ingestion timer");
             flb_free(ctx);
             return -1;
-        }
+        }*/
     }
 
     flb_output_set_context(ins, ctx);
