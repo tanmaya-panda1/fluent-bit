@@ -135,6 +135,8 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
             return -1;
         }
 
+        flb_plg_debug(ctx->ins, "[azure_kusto] new buffer file: %s", name);
+
         /* Create the file */
         fsf = flb_fstore_file_create(ctx->fs, ctx->stream_active, name, bytes);
         if (!fsf) {
@@ -182,6 +184,9 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
     }
     azure_kusto_file->size += bytes;
     ctx->current_buffer_size += bytes;
+
+    flb_plg_debug(ctx->ins, "[azure_kusto] new file size: %zu", azure_kusto_file->size);
+    flb_plg_debug(ctx->ins, "[azure_kusto] current_buffer_size: %zu", ctx->current_buffer_size);
 
     /* if buffer is 95% full, warn user */
     if (ctx->store_dir_limit_size > 0) {

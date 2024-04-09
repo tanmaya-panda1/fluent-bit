@@ -556,6 +556,7 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
     if (ctx->buffering_enabled == FLB_TRUE) {
         ctx->ins = ins;
         ctx->retry_time = 0;
+        ctx->store_dir_limit_size = FLB_AZURE_KUSTO_BUFFER_MAX_FILE_SIZE;
 
         /* Initialize local storage */
         int ret = azure_kusto_store_init(ctx);
@@ -866,6 +867,8 @@ static int buffer_chunk(void *out_context, struct azure_kusto_file *upload_file,
     int ret;
     struct flb_azure_kusto *ctx = out_context;
 
+    flb_plg_trace(ctx->ins, "Buffering chunk %d", chunk_size);
+
     ret = azure_kusto_store_buffer_put(ctx, upload_file, tag,
                               tag_len, chunk, (size_t) chunk_size, file_first_log_time);
     flb_sds_destroy(chunk);
@@ -1027,7 +1030,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         /* Buffering mode is enabled, call azure_kusto_flush_to_buffer */
         //azure_kusto_flush_to_buffer(json, json_size, event_chunk->tag, tag_len, i_ins, ctx, config);
-        flb_sds_destroy(json);
+        //flb_sds_destroy(json);
         FLB_OUTPUT_RETURN(FLB_OK);
     } else {
         /* Buffering mode is disabled, proceed with regular flush */
