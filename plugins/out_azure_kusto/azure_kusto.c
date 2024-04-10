@@ -586,14 +586,15 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
         }
 
         ctx->timer_created = FLB_FALSE;
-        ctx->timer_ms = (int) (ctx->upload_timeout / 6) * 1000;
+        /*ctx->timer_ms = (int) (ctx->upload_timeout / 6) * 1000;
         if (ctx->timer_ms > UPLOAD_TIMER_MAX_WAIT) {
             ctx->timer_ms = UPLOAD_TIMER_MAX_WAIT;
         }
         else if (ctx->timer_ms < UPLOAD_TIMER_MIN_WAIT) {
             ctx->timer_ms = UPLOAD_TIMER_MIN_WAIT;
-        }
+        }*/
 
+        ctx->timer_ms = 300000;
         flb_plg_debug(ins, "final timer_ms is  %d", ctx->timer_ms);
 
         /* validate 'total_file_size' */
@@ -1017,12 +1018,15 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         flush_init(ctx);
 
+        flb_plg_debug(ctx->ins,"event tag is  ::: %s", event_chunk->tag);
+
         /* Get a file candidate matching the given 'tag' */
         upload_file = azure_kusto_store_file_get(ctx,
                                         event_chunk->tag,
                                         event_chunk->size);
 
         if (upload_file == NULL) {
+            flb_plg_debug(ctx->ins, "upload_file is NULL, creating new file");
             ret = flb_log_event_decoder_init(&log_decoder,
                                              (char *) event_chunk->data,
                                              event_chunk->size);
