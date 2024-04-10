@@ -594,6 +594,8 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
             ctx->timer_ms = UPLOAD_TIMER_MIN_WAIT;
         }
 
+        flb_plg_debug(ins, "final timer_ms is  %d", ctx->timer_ms);
+
         /*mk_list_init(&ctx->buffer_files);
         ctx->current_file_path = NULL;
         ctx->current_file = NULL;
@@ -1274,6 +1276,13 @@ static struct flb_config_map config_map[] = {
     },
     {FLB_CONFIG_MAP_STR, "buffer_dir", "/tmp/fluent-bit/azure-kusto/", 0, FLB_TRUE,
             offsetof(struct flb_azure_kusto, buffer_dir), "Specifies the location of directory where the buffered data will be stored."
+    },
+    {FLB_CONFIG_MAP_TIME, "upload_timeout", "10m",
+            0, FLB_TRUE, offsetof(struct flb_azure_kusto, upload_timeout),
+    "Optionally specify a timeout for uploads. "
+    "Whenever this amount of time has elapsed, Fluent Bit will complete an "
+    "upload and create a new file in S3. For example, set this value to 60m "
+    "and you will get a new file in S3 every hour. Default is 10m."
     },
     {FLB_CONFIG_MAP_TIME, "ingestion_resources_refresh_interval", FLB_AZURE_KUSTO_RESOURCES_LOAD_INTERVAL_SEC,0, FLB_TRUE,
           offsetof(struct flb_azure_kusto, ingestion_resources_refresh_interval),
