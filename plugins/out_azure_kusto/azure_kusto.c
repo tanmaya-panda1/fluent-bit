@@ -403,7 +403,7 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
     flb_sds_t payload;
     flb_sds_t tag_sds;
 
-    flb_plg_debug(ctx->ins, "Running upload timer callback (cb_s3_upload)..");
+    flb_plg_debug(ctx->ins, "Running upload timer callback (cb_azure_kusto_ingest)..");
 
     now = time(NULL);
 
@@ -976,8 +976,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
     void *final_payload = NULL;
     size_t final_payload_size = 0;
 
-    flush_init(ctx);
-
     flb_plg_trace(ctx->ins, "flushing bytes %zu", event_chunk->size);
 
     tag_len = flb_sds_len(event_chunk->tag);
@@ -992,6 +990,14 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
     }
 
     if (ctx->buffering_enabled == FLB_TRUE) {
+
+        ret = azure_kusto_load_ingestion_resources(ctx, config);
+        if (ret != 0) {
+            flb_plg_error(ctx->ins, "cannot load ingestion resources");
+            FLB_OUTPUT_RETURN(FLB_ERROR);
+        }
+
+        flush_init(ctx);
 
         // Check if ctx is NULL
         if (ctx) {
