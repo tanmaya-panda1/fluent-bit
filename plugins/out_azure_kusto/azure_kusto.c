@@ -976,6 +976,8 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
     void *final_payload = NULL;
     size_t final_payload_size = 0;
 
+    flush_init(ctx);
+
     flb_plg_trace(ctx->ins, "flushing bytes %zu", event_chunk->size);
 
     tag_len = flb_sds_len(event_chunk->tag);
