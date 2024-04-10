@@ -83,6 +83,7 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
         }
 
         if (fsf->meta_size != tag_len) {
+            flb_plg_debug(ctx->ins, "File '%s' meta size (%zu) does not match tag length (%d)", fsf->name, fsf->meta_size, tag_len);
             fsf = NULL;
             continue;
         }
@@ -90,14 +91,18 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
         /* skip locked chunks */
         azure_kusto_file = fsf->data;
         if (azure_kusto_file->locked == FLB_TRUE) {
+            flb_plg_debug(ctx->ins, "File '%s' is locked, skipping", fsf->name);
             fsf = NULL;
             continue;
         }
 
         /* compare meta and tag */
         if (strncmp((char *) fsf->meta_buf, tag, tag_len) == 0) {
+            flb_plg_debug(ctx->ins, "Found matching file '%s' for tag '%.*s'", fsf->name, tag_len, tag);
             break;
         }
+
+        flb_plg_debug(ctx->ins, "File '%s' meta buffer does not match tag '%.*s'", fsf->name, tag_len, tag);
 
         /* not found, invalidate the reference */
         fsf = NULL;
