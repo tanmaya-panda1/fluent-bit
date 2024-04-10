@@ -82,11 +82,11 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
             flb_fstore_file_delete(ctx->fs, fsf);
         }
 
-        if (fsf->meta_size != tag_len) {
+        /*if (fsf->meta_size != tag_len) {
             flb_plg_debug(ctx->ins, "File '%s' meta size (%zu) does not match tag length (%d)", fsf->name, fsf->meta_size, tag_len);
             fsf = NULL;
             continue;
-        }
+        }*/
 
         /* skip locked chunks */
         azure_kusto_file = fsf->data;
