@@ -575,7 +575,7 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
     if (ctx->buffering_enabled == FLB_TRUE) {
         ctx->ins = ins;
         ctx->retry_time = 0;
-        ctx->store_dir_limit_size = FLB_AZURE_KUSTO_BUFFER_MAX_FILE_SIZE;
+        ctx->store_dir_limit_size = FLB_AZURE_KUSTO_BUFFER_DIR_MAX_SIZE;
 
         /* Initialize local storage */
         int ret = azure_kusto_store_init(ctx);
@@ -595,6 +595,22 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
         }
 
         flb_plg_debug(ins, "final timer_ms is  %d", ctx->timer_ms);
+
+        /* validate 'total_file_size' */
+        if (ctx->file_size <= 0) {
+            flb_plg_error(ctx->ins, "Failed to parse upload_file_size");
+            return -1;
+        }
+        if (ctx->file_size < 1000000) {
+            flb_plg_error(ctx->ins, "upload_file_size must be at least 1MB");
+            return -1;
+        }
+        if (ctx->file_size > MAX_FILE_SIZE) {
+            flb_plg_error(ctx->ins, "Max total_file_size is %ld bytes", MAX_FILE_SIZE);
+            return -1;
+        }
+        flb_plg_info(ctx->ins, "Using upload size %lu bytes", ctx->file_size);
+
 
         /*mk_list_init(&ctx->buffer_files);
         ctx->current_file_path = NULL;
@@ -1001,34 +1017,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         flush_init(ctx);
 
-        // Check if ctx is NULL
-        if (ctx) {
-            flb_plg_debug(ctx->ins, "ctx is not NULL");
-        } else {
-            flb_plg_error(ctx->ins, "ctx is NULL");
-        }
-
-// Check if event_chunk is NULL
-        if (event_chunk) {
-            flb_plg_debug(ctx->ins, "event_chunk is not NULL");
-        } else {
-            flb_plg_error(ctx->ins, "event_chunk is NULL");
-        }
-
-// Check if event_chunk->tag is NULL
-        if (event_chunk && event_chunk->tag) {
-            flb_plg_debug(ctx->ins, "event_chunk->tag is not NULL");
-        } else {
-            flb_plg_error(ctx->ins, "event_chunk->tag is NULL");
-        }
-
-// Check if event_chunk->size is zero
-        if (event_chunk && event_chunk->size > 0) {
-            flb_plg_debug(ctx->ins, "event_chunk->size is greater than zero");
-        } else {
-            flb_plg_error(ctx->ins, "event_chunk->size is zero or event_chunk is NULL");
-        }
-
         /* Get a file candidate matching the given 'tag' */
         upload_file = azure_kusto_store_file_get(ctx,
                                         event_chunk->tag,
@@ -1085,7 +1073,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         }
 
         /* If total_file_size has been reached, upload file */
-        if (upload_file && upload_file->size + json_size > ctx->upload_chunk_size) {
+        if (upload_file && upload_file->size + json_size > ctx->file_size) {
             total_file_size_check = FLB_TRUE;
         }
 
@@ -1125,7 +1113,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         FLB_OUTPUT_RETURN(FLB_OK);
     } else {
         /* Buffering mode is disabled, proceed with regular flush */
-        flb_plg_trace(ctx->ins, "payload size before compression %d", json_size);
+        flb_plg_trace(ctx->ins, "payload size before compression %zu", json_size);
         /* Map buffer */
         final_payload = json;
         final_payload_size = json_size;
@@ -1144,7 +1132,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                 /* JSON buffer will be cleared at cleanup: */
             }
         }
-        flb_plg_trace(ctx->ins, "payload size after compression %d", final_payload_size);
+        flb_plg_trace(ctx->ins, "payload size after compression %zu", final_payload_size);
 
         /* Load or refresh ingestion resources */
         ret = azure_kusto_load_ingestion_resources(ctx, config);
@@ -1283,6 +1271,10 @@ static struct flb_config_map config_map[] = {
     "Whenever this amount of time has elapsed, Fluent Bit will complete an "
     "upload and create a new file in S3. For example, set this value to 60m "
     "and you will get a new file in S3 every hour. Default is 10m."
+    },
+    {FLB_CONFIG_MAP_SIZE, "upload_file_size", "500000000",
+            0, FLB_TRUE, offsetof(struct flb_azure_kusto, file_size),
+    "Specifies the size of files to be uploaded. Default is 500MB"
     },
     {FLB_CONFIG_MAP_TIME, "ingestion_resources_refresh_interval", FLB_AZURE_KUSTO_RESOURCES_LOAD_INTERVAL_SEC,0, FLB_TRUE,
           offsetof(struct flb_azure_kusto, ingestion_resources_refresh_interval),

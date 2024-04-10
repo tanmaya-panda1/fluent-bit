@@ -66,6 +66,7 @@
 #define MAX_UPLOAD_ERRORS 5// 30 minutes
 #define UPLOAD_TIMER_MAX_WAIT 180000
 #define UPLOAD_TIMER_MIN_WAIT 18000
+#define MAX_FILE_SIZE         4000000000 // 4GB
 
 
 struct flb_azure_kusto_resources {
