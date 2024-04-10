@@ -431,14 +431,20 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
         payload = flb_sds_create(buffer);
         tag_sds = flb_sds_create(fsf->meta_buf);
 
+        ret = azure_kusto_load_ingestion_resources(ctx, config);
+        if (ret != 0) {
+            flb_plg_error(ctx->ins, "cannot load ingestion resources");
+            FLB_OUTPUT_RETURN(FLB_ERROR);
+        }
+
         ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), payload, flb_sds_len(payload));
         if (ret != 0) {
             flb_plg_error(ctx->ins, "Failed to ingest data to Azure Blob");
         }
 
         flb_free(buffer);
-        flb_sds_destroy(payload);
-        flb_sds_destroy(tag_sds);
+        //flb_sds_destroy(payload);
+        //flb_sds_destroy(tag_sds);
         if (ret != FLB_OK) {
             flb_plg_error(ctx->ins, "Could not send chunk with tag %s",
                           (char *) fsf->meta_buf);
@@ -459,6 +465,8 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t chunk,
     flb_sds_t payload;
     flb_sds_t tag_sds = flb_sds_create(tag);
 
+    flb_plg_trace(ctx->ins, "inside ingest_to_kusto_ext ");
+
     /* Create buffer to upload to S3 */
     ret = construct_request_buffer(ctx, chunk, upload_file, &buffer, &buffer_size);
     flb_sds_destroy(chunk);
@@ -469,6 +477,12 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t chunk,
     }
 
     payload = flb_sds_create(buffer);
+
+    //ret = azure_kusto_load_ingestion_resources(ctx, config);
+    //if (ret != 0) {
+    //    flb_plg_error(ctx->ins, "cannot load ingestion resources");
+    //    return -1;
+    //}
 
     // Call azure_kusto_queued_ingestion to ingest the payload
     ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), payload, flb_sds_len(payload));
@@ -508,8 +522,13 @@ static int ingest_to_kusto(struct flb_config *config, struct flb_sched_timer *ti
                 flb_plg_error(ctx->ins, "Failed to open buffer file: %s", metadata->file_path);
             }
 
+            int ret = azure_kusto_load_ingestion_resources(ctx, config);
+            if (ret != 0) {
+                flb_plg_error(ctx->ins, "cannot load ingestion resources");
+            }
+
             // Call azure_kusto_queued_ingestion to ingest the payload
-            int ret = azure_kusto_queued_ingestion(ctx, metadata->event_tag, metadata->tag_len, payload, metadata->file_size);
+            ret = azure_kusto_queued_ingestion(ctx, metadata->event_tag, metadata->tag_len, payload, metadata->file_size);
             if (ret != 0) {
                 flb_plg_error(ctx->ins, "Failed to ingest data to Azure Blob");
             }
@@ -564,6 +583,15 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
             flb_plg_error(ctx->ins, "Failed to initialize kusto storage: %s",
                           ctx->store_dir);
             return -1;
+        }
+
+        ctx->timer_created = FLB_FALSE;
+        ctx->timer_ms = (int) (ctx->upload_timeout / 6) * 1000;
+        if (ctx->timer_ms > UPLOAD_TIMER_MAX_WAIT) {
+            ctx->timer_ms = UPLOAD_TIMER_MAX_WAIT;
+        }
+        else if (ctx->timer_ms < UPLOAD_TIMER_MIN_WAIT) {
+            ctx->timer_ms = UPLOAD_TIMER_MIN_WAIT;
         }
 
         /*mk_list_init(&ctx->buffer_files);
@@ -879,6 +907,51 @@ static int buffer_chunk(void *out_context, struct azure_kusto_file *upload_file,
     return 0;
 }
 
+static void flush_init(void *out_context)
+{
+    int ret;
+    struct flb_azure_kusto *ctx = out_context;
+    struct flb_sched *sched;
+
+    /* clean up any old buffers found on startup */
+    if (ctx->has_old_buffers == FLB_TRUE) {
+        flb_plg_info(ctx->ins,
+                     "Sending locally buffered data from previous "
+                     "executions to kusto; buffer=%s",
+                     ctx->fs->root_path);
+        ctx->has_old_buffers = FLB_FALSE;
+        /*ret = put_all_chunks(ctx);
+        if (ret < 0) {
+            ctx->has_old_buffers = FLB_TRUE;
+            flb_plg_error(ctx->ins,
+                          "Failed to send locally buffered data left over "
+                          "from previous executions; will retry. Buffer=%s",
+                          ctx->fs->root_path);
+            FLB_OUTPUT_RETURN(FLB_RETRY);
+        }*/
+    }
+
+    /*
+     * create a timer that will run periodically and check if uploads
+     * are ready for completion
+     * this is created once on the first flush
+     */
+    if (ctx->timer_created == FLB_FALSE) {
+        flb_plg_debug(ctx->ins,
+                      "Creating upload timer with frequency %ds",
+                      ctx->timer_ms / 1000);
+
+        sched = flb_sched_ctx_get();
+        ret = flb_sched_timer_cb_create(sched, FLB_SCHED_TIMER_CB_PERM,
+                                            ctx->timer_ms, cb_azure_kusto_ingest, ctx, NULL);
+        if (ret == -1) {
+            flb_plg_error(ctx->ins, "Failed to create upload timer");
+            FLB_OUTPUT_RETURN(FLB_RETRY);
+        }
+        ctx->timer_created = FLB_TRUE;
+    }
+}
+
 static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                  struct flb_output_flush *out_flush,
                                  struct flb_input_instance *i_ins, void *out_context,
@@ -1008,6 +1081,14 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
         if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
+            flb_plg_trace(ctx->ins, "before loading ingestion resources xxxx ");
+            /* Load or refresh ingestion resources */
+            ret = azure_kusto_load_ingestion_resources(ctx, config);
+            if (ret != 0) {
+                flb_plg_error(ctx->ins, "cannot load ingestion resources");
+                FLB_OUTPUT_RETURN(FLB_ERROR);
+            }
+
             /* Send upload directly without upload queue */
             ret = ingest_to_kusto_ext(ctx, json, upload_file,
                                       event_chunk->tag,
