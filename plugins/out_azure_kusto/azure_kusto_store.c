@@ -96,13 +96,14 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
             continue;
         }
 
+
         /* compare meta and tag */
-        if (strncmp((char *) fsf->meta_buf, tag, tag_len) == 0) {
+        if (strncmp((char *) fsf->name, tag, tag_len) == 0) {
             flb_plg_debug(ctx->ins, "Found matching file '%s' for tag '%.*s'", fsf->name, tag_len, tag);
             break;
         }
 
-        flb_plg_debug(ctx->ins, "File '%s' meta buffer does not match tag '%.*s'", fsf->name, tag_len, tag);
+        //flb_plg_debug(ctx->ins, "File '%s' meta buffer does not match tag '%.*s'", fsf->name, tag_len, tag);
 
         /* not found, invalidate the reference */
         fsf = NULL;
@@ -134,7 +135,8 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
 
     /* If no target file was found, create a new one */
     if (!azure_kusto_file) {
-        name = gen_store_filename(tag);
+        //name = gen_store_filename(tag);
+        name = flb_sds_create_len(tag, tag_len);;
         if (!name) {
             flb_plg_error(ctx->ins, "could not generate chunk file name");
             return -1;
