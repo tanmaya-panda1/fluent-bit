@@ -488,6 +488,7 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t chunk,
     ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), payload, flb_sds_len(payload));
     if (ret != 0) {
         flb_plg_error(ctx->ins, "Failed to ingest data to Azure Blob");
+        return -1;
     }
 
     return 0;
@@ -1095,6 +1096,10 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             ret = ingest_to_kusto_ext(ctx, json, upload_file,
                                       event_chunk->tag,
                                       flb_sds_len(event_chunk->tag));
+            if (ret == 0){
+                flb_plg_debug(ctx->ins, "successfully ingested and deleted file %s ", upload_file->file_path);
+                azure_kusto_store_file_delete(ctx, upload_file);
+            }
             if (ret < 0) {
                 FLB_OUTPUT_RETURN(FLB_ERROR);
             }
