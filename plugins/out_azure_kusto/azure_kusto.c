@@ -442,9 +442,14 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
             flb_plg_error(ctx->ins, "Failed to ingest data to Azure Blob");
         }
 
+        if (ret == 0) {
+            flb_plg_debug(ctx->ins, "deleted successfully ingested file %s", fsf->name);
+            flb_fstore_file_delete(ctx->fs, fsf);
+        }
+
         flb_free(buffer);
-        //flb_sds_destroy(payload);
-        //flb_sds_destroy(tag_sds);
+        flb_sds_destroy(payload);
+        flb_sds_destroy(tag_sds);
         if (ret != FLB_OK) {
             flb_plg_error(ctx->ins, "Could not send chunk with tag %s",
                           (char *) fsf->meta_buf);
