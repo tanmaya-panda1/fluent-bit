@@ -1022,7 +1022,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             FLB_OUTPUT_RETURN(FLB_ERROR);
         }
 
-        flush_init(ctx);
+       // flush_init(ctx);
 
         flb_plg_debug(ctx->ins,"event tag is  ::: %s", event_chunk->tag);
 
