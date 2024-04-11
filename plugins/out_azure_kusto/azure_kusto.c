@@ -594,7 +594,7 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
             ctx->timer_ms = UPLOAD_TIMER_MIN_WAIT;
         }*/
 
-        ctx->timer_ms = 300000;
+        ctx->timer_ms = 1800000;
         flb_plg_debug(ins, "final timer_ms is  %d", ctx->timer_ms);
 
         /* validate 'total_file_size' */
