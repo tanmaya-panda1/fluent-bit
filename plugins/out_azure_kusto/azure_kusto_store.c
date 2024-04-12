@@ -226,10 +226,11 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
     }
     else {
 
-        flb_plg_debug(ctx->ins, "[azure_kusto] when azure_kusto_file exists : %s -- %zu -- %zu", name, azure_kusto_file->size, ctx->file_size);
+        flb_plg_debug(ctx->ins, "[azure_kusto] when azure_kusto_file exists : %s -- %zu -- %zu", azure_kusto_file->fsf->name, azure_kusto_file->size, ctx->file_size);
         /* skip files larger than 100MB */
         if (azure_kusto_file->size > ctx->file_size) {
-            flb_plg_debug(ctx->ins, "File '%s' is larger than 100MB, skipping", fsf->name);
+            name = azure_kusto_file->fsf->name;
+            flb_plg_debug(ctx->ins, "File '%s' is larger than 100MB, skipping", name);
             /* Check if the file name already exists in the buffer directory */
             int file_exists = flb_fstore_file_exists(ctx->fs, name);
             int suffix = 1;
