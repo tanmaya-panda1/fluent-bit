@@ -1110,7 +1110,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         //flb_plg_debug(ctx->ins,"upload_file retrieved is  ::: %s", upload_file->);
 
         if (upload_file == NULL) {
-            flb_plg_debug(ctx->ins, "upload_file is NULL, creating new file");
+            flb_plg_debug(ctx->ins, "upload_file is NULL or size exceeded, creating new file");
             ret = flb_log_event_decoder_init(&log_decoder,
                                              (char *) event_chunk->data,
                                              event_chunk->size);

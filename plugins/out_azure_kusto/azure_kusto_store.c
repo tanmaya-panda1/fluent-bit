@@ -169,10 +169,25 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
     /* If no target file was found, create a new one */
     if (!azure_kusto_file) {
         //name = gen_store_filename(tag);
-        name = flb_sds_create_len(tag, tag_len);;
+        name = flb_sds_create_len(tag, tag_len);
         if (!name) {
             flb_plg_error(ctx->ins, "could not generate chunk file name");
             return -1;
+        }
+
+        /* Check if the file name already exists in the buffer directory */
+        int file_exists = flb_fstore_file_exists(ctx->fs, name);
+        int suffix = 1;
+        while (file_exists) {
+            flb_plg_debug(ctx->ins, "file name generated exists %s", name);
+            /* If the file name exists, create a new file name by adding a suffix */
+            flb_sds_t new_name = flb_sds_create_size(flb_sds_len(name) + 10);
+            flb_sds_printf(&new_name, "%s_%d", name, suffix);
+            flb_sds_destroy(name);
+            name = new_name;
+            flb_plg_debug(ctx->ins, "new file name generated is %s", name);
+            file_exists = flb_fstore_file_exists(ctx->fs, name);
+            suffix++;
         }
 
         flb_plg_debug(ctx->ins, "[azure_kusto] new buffer file: %s", name);
