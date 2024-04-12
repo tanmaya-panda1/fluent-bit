@@ -116,6 +116,32 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
     return fsf->data;
 }
 
+/*void flb_fstore_file_close(struct flb_fstore_file *fsf)
+{
+    if (fsf) {
+        if (fsf->fd > 0) {
+            close(fsf->fd);
+            fsf->fd = -1;
+        }
+        flb_free(fsf->name);
+        flb_free(fsf);
+    }
+}*/
+
+int flb_fstore_file_exists(struct flb_fstore *fs, flb_sds_t name)
+{
+    char path[PATH_MAX];
+    struct stat st;
+
+    snprintf(path, sizeof(path) - 1, "%s/%s", fs->root_path, name);
+    if (stat(path, &st) == 0) {
+        if (S_ISREG(st.st_mode)) {
+            return FLB_TRUE;
+        }
+    }
+    return FLB_FALSE;
+}
+
 int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file,
                                  const char *tag, int tag_len,
                                  char *data, size_t bytes,
@@ -135,7 +161,7 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
     /* If no target file was found or the current file size exceeds 100MB, create a new one */
     if (!azure_kusto_file || azure_kusto_file->size >= 100 * 1024 * 1024) {
         if (azure_kusto_file) {
-            flb_fstore_file_close(azure_kusto_file->fsf);
+            //flb_fstore_file_close(azure_kusto_file->fsf);
             flb_free(azure_kusto_file);
         }
 
