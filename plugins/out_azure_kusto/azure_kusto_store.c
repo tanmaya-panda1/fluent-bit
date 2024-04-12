@@ -284,9 +284,10 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
             azure_kusto_file->fsf = fsf;
             azure_kusto_file->first_log_time = file_first_log_time;
             azure_kusto_file->create_time = time(NULL);
+            fsf->data = azure_kusto_file;
+        }else{
+            fsf = azure_kusto_file->fsf;
         }
-
-        fsf = azure_kusto_file->fsf;
     }
 
     /* Append data to the target file */
