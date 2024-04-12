@@ -234,6 +234,83 @@ flb_sds_t execute_ingest_csl_command(struct flb_azure_kusto *ctx, const char *cs
     return resp;
 }
 
+static flb_sds_t azure_kusto_format_file_name(struct flb_azure_kusto *ctx,
+                                              const char *tag, int tag_len)
+{
+    struct flb_time tm;
+    char time_str[64];
+    int len;
+    flb_sds_t file_name;
+
+    flb_time_get(&tm);
+    len = snprintf(time_str, sizeof(time_str) - 1,
+                   "%04d%02d%02d%02d%02d%02d",
+                   tm.tm.tv_sec / 86400, tm.tm.tv_sec / 3600 % 24,
+                   tm.tm.tv_sec / 60 % 60, tm.tm.tv_sec % 60,
+                   tm.tm.tv_nsec / 1000000, tm.tm.tv_nsec % 1000000);
+
+    file_name = flb_sds_create_size(tag_len + len + 5);
+    if (!file_name) {
+        flb_errno();
+        return NULL;
+    }
+
+    flb_sds_cat_safe(&file_name, tag, tag_len);
+    flb_sds_cat_safe(&file_name, "_", 1);
+    flb_sds_cat_safe(&file_name, time_str, len);
+    flb_sds_cat_safe(&file_name, ".log", 4);
+
+    return file_name;
+}
+
+static int azure_kusto_buffer_data(struct flb_azure_kusto *ctx,
+                                   const char *tag, int tag_len,
+                                   char *data, size_t bytes)
+{
+    int ret;
+    flb_sds_t file_name;
+    flb_sds_t file_path;
+    FILE *fp;
+
+    file_name = azure_kusto_format_file_name(ctx, tag, tag_len);
+    if (!file_name) {
+        flb_plg_error(ctx->ins, "failed to format file name");
+        return -1;
+    }
+
+    file_path = flb_sds_create_size(flb_sds_len(ctx->buffer_dir) + flb_sds_len(file_name) + 2);
+    if (!file_path) {
+        flb_errno();
+        flb_sds_destroy(file_name);
+        return -1;
+    }
+
+    flb_sds_cat_safe(&file_path, ctx->buffer_dir, flb_sds_len(ctx->buffer_dir));
+    flb_sds_cat_safe(&file_path, "/", 1);
+    flb_sds_cat_safe(&file_path, file_name, flb_sds_len(file_name));
+    flb_sds_destroy(file_name);
+
+    fp = fopen(file_path, "ab");
+    if (!fp) {
+        flb_errno();
+        flb_sds_destroy(file_path);
+        return -1;
+    }
+
+    ret = fwrite(data, 1, bytes, fp);
+    if (ret != bytes) {
+        flb_errno();
+        fclose(fp);
+        flb_sds_destroy(file_path);
+        return -1;
+    }
+
+    fclose(fp);
+    flb_sds_destroy(file_path);
+
+    return 0;
+}
+
 /*
  * return value is one of FLB_OK, FLB_RETRY, FLB_ERROR
  *
@@ -869,7 +946,7 @@ static void azure_kusto_flush_to_buffer(const void *data, size_t bytes, const ch
             flb_plg_error(ctx->ins, "Failed to allocate buffer file path");
             return;
         }
-        flb_sds_printf(&ctx->current_file_path, "%s/%s_%lu.buf", ctx->buffer_dir,
+        flb_sds_printf(&ctx->current_file_path, "%s/%s_%lld.buf", ctx->buffer_dir,
                        "fluent-bit-kusto", get_current_time_milliseconds());
 
         ctx->current_file = flb_sds_create_file(ctx->current_file_path, "wb", 0);
@@ -1016,7 +1093,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
     if (ctx->buffering_enabled == FLB_TRUE) {
 
-        ret = azure_kusto_load_ingestion_resources(ctx, config);
+        /*ret = azure_kusto_load_ingestion_resources(ctx, config);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "cannot load ingestion resources");
             FLB_OUTPUT_RETURN(FLB_ERROR);
@@ -1026,10 +1103,11 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         flb_plg_debug(ctx->ins,"event tag is  ::: %s", event_chunk->tag);
 
-        /* Get a file candidate matching the given 'tag' */
+        *//* Get a file candidate matching the given 'tag' *//*
         upload_file = azure_kusto_store_file_get(ctx,
                                         event_chunk->tag,
                                         event_chunk->size);
+        flb_plg_debug(ctx->ins,"upload_file retrieved is  ::: %s", upload_file->file_path);
 
         if (upload_file == NULL) {
             flb_plg_debug(ctx->ins, "upload_file is NULL, creating new file");
@@ -1058,7 +1136,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             flb_log_event_decoder_destroy(&log_decoder);
         }
         else {
-            /* Get file_first_log_time from upload_file */
+            *//* Get file_first_log_time from upload_file *//*
             file_first_log_time = upload_file->first_log_time;
         }
 
@@ -1066,7 +1144,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             file_first_log_time = time(NULL);
         }
 
-        /* Discard upload_file if it has failed to upload MAX_UPLOAD_ERRORS times */
+        *//* Discard upload_file if it has failed to upload MAX_UPLOAD_ERRORS times *//*
         if (upload_file != NULL && upload_file->failures >= MAX_UPLOAD_ERRORS) {
             flb_plg_warn(ctx->ins, "File with tag %s failed to send %d times, will not "
                                    "retry", event_chunk->tag, MAX_UPLOAD_ERRORS);
@@ -1074,7 +1152,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             upload_file = NULL;
         }
 
-        /* If upload_timeout has elapsed, upload file */
+        *//* If upload_timeout has elapsed, upload file *//*
         if (upload_file != NULL && time(NULL) >
                                    (upload_file->create_time + ctx->upload_timeout)) {
             upload_timeout_check = FLB_TRUE;
@@ -1082,10 +1160,12 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                          event_chunk->tag);
         }
 
-        /* If total_file_size has been reached, upload file */
+        *//* If total_file_size has been reached, upload file *//*
         if (upload_file && upload_file->size + json_size > ctx->file_size) {
+            flb_plg_info(ctx->ins, "total_file_size exceeded %s",
+                         event_chunk->tag);
             total_file_size_check = FLB_TRUE;
-        }
+        }*/
 
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
         /*if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
@@ -1112,17 +1192,17 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         }*/
 
         /* Buffer current chunk in filesystem and wait for next chunk from engine */
-        ret = buffer_chunk(ctx, upload_file, json, json_size,
+        /*ret = buffer_chunk(ctx, upload_file, json, json_size,
                            event_chunk->tag, flb_sds_len(event_chunk->tag),
                            file_first_log_time);
 
         if (ret < 0) {
             FLB_OUTPUT_RETURN(FLB_RETRY);
-        }
+        }*/
 
 
         /* Buffering mode is enabled, call azure_kusto_flush_to_buffer */
-        //azure_kusto_flush_to_buffer(json, json_size, event_chunk->tag, tag_len, i_ins, ctx, config);
+        azure_kusto_flush_to_buffer(json, json_size, event_chunk->tag, tag_len, i_ins, ctx, config);
         //flb_sds_destroy(json);
         FLB_OUTPUT_RETURN(FLB_OK);
     } else {

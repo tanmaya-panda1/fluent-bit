@@ -96,6 +96,13 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
             continue;
         }
 
+        /* skip files larger than 100MB */
+        if (azure_kusto_file->size > 100 * 1024 * 1024) {
+            flb_plg_debug(ctx->ins, "File '%s' is larger than 100MB, skipping", fsf->name);
+            fsf = NULL;
+            continue;
+        }
+
 
         /* compare meta and tag */
         if (strncmp((char *) fsf->name, tag, tag_len) == 0) {
@@ -142,109 +149,8 @@ int flb_fstore_file_exists(struct flb_fstore *fs, flb_sds_t name)
     return FLB_FALSE;
 }
 
-int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file,
-                                 const char *tag, int tag_len,
-                                 char *data, size_t bytes,
-                                 time_t file_first_log_time)
-{
-    int ret;
-    flb_sds_t name;
-    struct flb_fstore_file *fsf;
-    size_t space_remaining;
-
-    if (ctx->store_dir_limit_size > 0 && ctx->current_buffer_size + bytes >= ctx->store_dir_limit_size) {
-        flb_plg_error(ctx->ins, "Buffer is full: current_buffer_size=%zu, new_data=%zu, store_dir_limit_size=%zu bytes",
-                      ctx->current_buffer_size, bytes, ctx->store_dir_limit_size);
-        return -1;
-    }
-
-    /* If no target file was found or the current file size exceeds 100MB, create a new one */
-    if (!azure_kusto_file || azure_kusto_file->size >= 100 * 1024 * 1024) {
-        if (azure_kusto_file) {
-            //flb_fstore_file_close(azure_kusto_file->fsf);
-            flb_free(azure_kusto_file);
-        }
-
-        int increment = 0;
-        do {
-            name = flb_sds_create_size(tag_len + 32);
-            if (!name) {
-                flb_plg_error(ctx->ins, "could not allocate buffer for chunk file name");
-                return -1;
-            }
-            snprintf(name, flb_sds_alloc(name), "%.*s_kusto_%d", tag_len, tag, increment);
-            increment++;
-        } while (flb_fstore_file_exists(ctx->fs, name) == FLB_TRUE);
-
-        flb_plg_debug(ctx->ins, "[azure_kusto] new buffer file: %s", name);
-
-        /* Create the file */
-        fsf = flb_fstore_file_create(ctx->fs, ctx->stream_active, name, bytes);
-        if (!fsf) {
-            flb_plg_error(ctx->ins, "could not create the file '%s' in the store",
-                          name);
-            flb_sds_destroy(name);
-            return -1;
-        }
-        flb_sds_destroy(name);
-
-        /* Write tag as metadata */
-        ret = flb_fstore_file_meta_set(ctx->fs, fsf, (char *) tag, tag_len);
-        if (ret == -1) {
-            flb_plg_error(ctx->ins, "error writing tag metadata");
-            flb_plg_warn(ctx->ins, "Deleting buffer file because metadata could not be written");
-            flb_fstore_file_delete(ctx->fs, fsf);
-            return -1;
-        }
-
-        /* Allocate local context */
-        azure_kusto_file = flb_calloc(1, sizeof(struct azure_kusto_file));
-        if (!azure_kusto_file) {
-            flb_errno();
-            flb_plg_error(ctx->ins, "cannot allocate azure_kusto file context");
-            flb_plg_warn(ctx->ins, "Deleting buffer file because azure_kusto context creation failed");
-            flb_fstore_file_delete(ctx->fs, fsf);
-            return -1;
-        }
-        azure_kusto_file->fsf = fsf;
-        azure_kusto_file->first_log_time = file_first_log_time;
-        azure_kusto_file->create_time = time(NULL);
-        azure_kusto_file->size = 0;
-
-        /* Use fstore opaque 'data' reference to keep our context */
-        fsf->data = azure_kusto_file;
-    }
-    else {
-        fsf = azure_kusto_file->fsf;
-    }
-
-    /* Append data to the target file */
-    ret = flb_fstore_file_append(fsf, data, bytes);
-    if (ret != 0) {
-        flb_plg_error(ctx->ins, "error writing data to local azure_kusto file");
-        return -1;
-    }
-    azure_kusto_file->size += bytes;
-    ctx->current_buffer_size += bytes;
-
-    flb_plg_debug(ctx->ins, "[azure_kusto] new file size: %zu", azure_kusto_file->size);
-    flb_plg_debug(ctx->ins, "[azure_kusto] current_buffer_size: %zu", ctx->current_buffer_size);
-
-    /* if buffer is 95% full, warn user */
-    if (ctx->store_dir_limit_size > 0) {
-        space_remaining = ctx->store_dir_limit_size - ctx->current_buffer_size;
-        if ((space_remaining * 20) < ctx->store_dir_limit_size) {
-            flb_plg_warn(ctx->ins, "Buffer is almost full: current_buffer_size=%zu, store_dir_limit_size=%zu bytes",
-                         ctx->current_buffer_size, ctx->store_dir_limit_size);
-            return -1;
-        }
-    }
-
-    return 0;
-}
-
 /* Append data to a new or existing fstore file */
-int azure_kusto_store_buffer_put_ext(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file,
+int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file,
                         const char *tag, int tag_len,
                         char *data, size_t bytes,
                         time_t file_first_log_time)
