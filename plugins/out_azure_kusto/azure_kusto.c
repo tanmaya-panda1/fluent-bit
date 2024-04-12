@@ -1103,7 +1103,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         flb_plg_debug(ctx->ins,"event tag is  ::: %s", event_chunk->tag);
 
-        *//* Get a file candidate matching the given 'tag' *//*
+        /* Get a file candidate matching the given 'tag' */
         upload_file = azure_kusto_store_file_get(ctx,
                                         event_chunk->tag,
                                         event_chunk->size);
@@ -1136,7 +1136,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             flb_log_event_decoder_destroy(&log_decoder);
         }
         else {
-            *//* Get file_first_log_time from upload_file *//*
+            /* Get file_first_log_time from upload_file */
             file_first_log_time = upload_file->first_log_time;
         }
 
@@ -1144,7 +1144,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             file_first_log_time = time(NULL);
         }
 
-        *//* Discard upload_file if it has failed to upload MAX_UPLOAD_ERRORS times *//*
+        /* Discard upload_file if it has failed to upload MAX_UPLOAD_ERRORS times */
         if (upload_file != NULL && upload_file->failures >= MAX_UPLOAD_ERRORS) {
             flb_plg_warn(ctx->ins, "File with tag %s failed to send %d times, will not "
                                    "retry", event_chunk->tag, MAX_UPLOAD_ERRORS);
@@ -1152,7 +1152,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             upload_file = NULL;
         }
 
-        *//* If upload_timeout has elapsed, upload file *//*
+        /* If upload_timeout has elapsed, upload file */
         if (upload_file != NULL && time(NULL) >
                                    (upload_file->create_time + ctx->upload_timeout)) {
             upload_timeout_check = FLB_TRUE;
@@ -1160,7 +1160,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                          event_chunk->tag);
         }
 
-        *//* If total_file_size has been reached, upload file *//*
+        /* If total_file_size has been reached, upload file */
         if (upload_file && upload_file->size + json_size > ctx->file_size) {
             flb_plg_info(ctx->ins, "total_file_size exceeded %s",
                          event_chunk->tag);
