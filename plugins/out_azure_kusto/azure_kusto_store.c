@@ -99,14 +99,14 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
         }
 
         /* skip files larger than 100MB */
-        /*if (azure_kusto_file->size > 100 * 1024 * 1024) {
+        if (azure_kusto_file->size > 100 * 1024 * 1024) {
             flb_plg_debug(ctx->ins, "File '%s' is larger than 100MB, skipping", fsf->name);
             fsf = NULL;
-            break;
-        }*/
+            continue;
+        }
 
         /* move files larger than 100MB to a different directory */
-        if (azure_kusto_file->size > 100 * 1024 * 1024) {
+        /*if (azure_kusto_file->size > 100 * 1024 * 1024) {
             flb_plg_debug(ctx->ins, "File '%s' is larger than 100MB, renaming with upload_ prefix", fsf->name);
             snprintf(new_file_name, sizeof(new_file_name), "%s%s", upload_prefix, fsf->name);
             if (rename(fsf->name, new_file_name) != 0) {
@@ -118,7 +118,7 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
             }
             fsf = NULL;
             continue;
-        }
+        }*/
 
 
         /* compare meta and tag */
