@@ -68,6 +68,8 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
     struct mk_list *tmp;
     struct flb_fstore_file *fsf = NULL;
     struct azure_kusto_file *azure_kusto_file;
+    char *large_file_dir = "large_files";
+    char large_file_path[PATH_MAX];
 
     /*
      * Based in the current ctx->stream_name, locate a candidate file to
@@ -103,9 +105,22 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
             break;
         }*/
 
+        /* move files larger than 100MB to a different directory */
+        if (azure_kusto_file->size > 100 * 1024 * 1024) {
+            flb_plg_debug(ctx->ins, "File '%s' is larger than 100MB, moving to large files directory", fsf->name);
+            snprintf(large_file_path, sizeof(large_file_path), "%s/%s/%s", ctx->fs->root_path, large_file_dir, fsf->name);
+            if (rename(fsf->name, large_file_path) != 0) {
+                flb_plg_error(ctx->ins, "Failed to move file '%s' to large files directory", fsf->name);
+            } else {
+                flb_plg_debug(ctx->ins, "Moved file '%s' to large files directory", fsf->name);
+            }
+            fsf = NULL;
+            continue;
+        }
+
 
         /* compare meta and tag */
-        if (strncmp((char *) fsf->name, tag, tag_len) == 0 && azure_kusto_file->size < 100 * 1024 * 1024) {
+        if (strncmp((char *) fsf->name, tag, tag_len) == 0 ) {
             flb_plg_debug(ctx->ins, "Found matching file '%s' for tag and file size is less than 100MB '%.*s'", fsf->name, tag_len, tag);
             break;
         }
