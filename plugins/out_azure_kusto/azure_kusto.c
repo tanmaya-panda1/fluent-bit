@@ -1107,7 +1107,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         upload_file = azure_kusto_store_file_get(ctx,
                                         event_chunk->tag,
                                         event_chunk->size);
-        flb_plg_debug(ctx->ins,"upload_file retrieved is  ::: %s", upload_file->file_path);
+        //flb_plg_debug(ctx->ins,"upload_file retrieved is  ::: %s", upload_file->);
 
         if (upload_file == NULL) {
             flb_plg_debug(ctx->ins, "upload_file is NULL, creating new file");
