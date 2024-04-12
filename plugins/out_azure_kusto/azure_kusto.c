@@ -1093,7 +1093,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
     if (ctx->buffering_enabled == FLB_TRUE) {
 
-        /*ret = azure_kusto_load_ingestion_resources(ctx, config);
+        ret = azure_kusto_load_ingestion_resources(ctx, config);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "cannot load ingestion resources");
             FLB_OUTPUT_RETURN(FLB_ERROR);
@@ -1165,7 +1165,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             flb_plg_info(ctx->ins, "total_file_size exceeded %s",
                          event_chunk->tag);
             total_file_size_check = FLB_TRUE;
-        }*/
+        }
 
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
         /*if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
@@ -1192,17 +1192,17 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         }*/
 
         /* Buffer current chunk in filesystem and wait for next chunk from engine */
-        /*ret = buffer_chunk(ctx, upload_file, json, json_size,
+        ret = buffer_chunk(ctx, upload_file, json, json_size,
                            event_chunk->tag, flb_sds_len(event_chunk->tag),
                            file_first_log_time);
 
         if (ret < 0) {
             FLB_OUTPUT_RETURN(FLB_RETRY);
-        }*/
+        }
 
 
         /* Buffering mode is enabled, call azure_kusto_flush_to_buffer */
-        azure_kusto_flush_to_buffer(json, json_size, event_chunk->tag, tag_len, i_ins, ctx, config);
+        //azure_kusto_flush_to_buffer(json, json_size, event_chunk->tag, tag_len, i_ins, ctx, config);
         //flb_sds_destroy(json);
         FLB_OUTPUT_RETURN(FLB_OK);
     } else {
