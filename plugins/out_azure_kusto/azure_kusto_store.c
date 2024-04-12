@@ -97,16 +97,16 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
         }
 
         /* skip files larger than 100MB */
-        if (azure_kusto_file->size > 100 * 1024 * 1024) {
+        /*if (azure_kusto_file->size > 100 * 1024 * 1024) {
             flb_plg_debug(ctx->ins, "File '%s' is larger than 100MB, skipping", fsf->name);
             fsf = NULL;
-            continue;
-        }
+            break;
+        }*/
 
 
         /* compare meta and tag */
-        if (strncmp((char *) fsf->name, tag, tag_len) == 0) {
-            flb_plg_debug(ctx->ins, "Found matching file '%s' for tag '%.*s'", fsf->name, tag_len, tag);
+        if (strncmp((char *) fsf->name, tag, tag_len) == 0 && azure_kusto_file->size < 100 * 1024 * 1024) {
+            flb_plg_debug(ctx->ins, "Found matching file '%s' for tag and file size is less than 100MB '%.*s'", fsf->name, tag_len, tag);
             break;
         }
 
