@@ -176,63 +176,7 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         return -1;
     }
 
-    /* skip files larger than 100MB */
-    if (azure_kusto_file && azure_kusto_file->size > 100 * 1024 * 1024) {
-        flb_plg_debug(ctx->ins, "File '%s' is larger than 100MB, skipping", fsf->name);
-        /* Check if the file name already exists in the buffer directory */
-        int file_exists = flb_fstore_file_exists(ctx->fs, name);
-        int suffix = 1;
-        while (file_exists) {
-            flb_plg_debug(ctx->ins, "file name generated exists %s", name);
-            /* If the file name exists, create a new file name by adding a suffix */
-            flb_sds_t new_name = flb_sds_create_size(flb_sds_len(name) + 10);
-            flb_sds_printf(&new_name, "%s_%d", name, suffix);
-            flb_sds_destroy(name);
-            name = new_name;
-            flb_plg_debug(ctx->ins, "new file name generated is %s", name);
-            file_exists = flb_fstore_file_exists(ctx->fs, name);
-            suffix++;
-        }
-
-        if (!name) {
-            flb_plg_error(ctx->ins, "could not generate chunk file name");
-            return -1;
-        }
-
-        flb_plg_debug(ctx->ins, "[azure_kusto] new buffer file: %s", name);
-
-        /* Create the file */
-        fsf = flb_fstore_file_create(ctx->fs, ctx->stream_active, name, bytes);
-        if (!fsf) {
-            flb_plg_error(ctx->ins, "could not create the file '%s' in the store",
-                          name);
-            flb_sds_destroy(name);
-            return -1;
-        }
-        flb_sds_destroy(name);
-
-        /* Write tag as metadata */
-        ret = flb_fstore_file_meta_set(ctx->fs, fsf, (char *) tag, tag_len);
-        if (ret == -1) {
-            flb_plg_error(ctx->ins, "error writing tag metadata");
-            flb_plg_warn(ctx->ins, "Deleting buffer file because metadata could not be written");
-            flb_fstore_file_delete(ctx->fs, fsf);
-            return -1;
-        }
-
-        /* Allocate local context */
-        azure_kusto_file = flb_calloc(1, sizeof(struct azure_kusto_file));
-        if (!azure_kusto_file) {
-            flb_errno();
-            flb_plg_error(ctx->ins, "cannot allocate azure_kusto file context");
-            flb_plg_warn(ctx->ins, "Deleting buffer file because azure_kusto context creation failed");
-            flb_fstore_file_delete(ctx->fs, fsf);
-            return -1;
-        }
-        azure_kusto_file->fsf = fsf;
-        azure_kusto_file->first_log_time = file_first_log_time;
-        azure_kusto_file->create_time = time(NULL);
-    }
+    flb_plg_error(ctx->ins, "inside azure_kusto_store_buffer_put function");
 
     /* If no target file was found, create a new one */
     if (!azure_kusto_file) {
@@ -281,6 +225,66 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         fsf->data = azure_kusto_file;
     }
     else {
+
+        flb_plg_debug(ctx->ins, "[azure_kusto] when azure_kusto_file exists : %s -- %zu -- %zu", name, azure_kusto_file->size, ctx->file_size);
+        /* skip files larger than 100MB */
+        if (azure_kusto_file->size > ctx->file_size) {
+            flb_plg_debug(ctx->ins, "File '%s' is larger than 100MB, skipping", fsf->name);
+            /* Check if the file name already exists in the buffer directory */
+            int file_exists = flb_fstore_file_exists(ctx->fs, name);
+            int suffix = 1;
+            while (file_exists) {
+                flb_plg_debug(ctx->ins, "file name generated exists %s", name);
+                /* If the file name exists, create a new file name by adding a suffix */
+                flb_sds_t new_name = flb_sds_create_size(flb_sds_len(name) + 10);
+                flb_sds_printf(&new_name, "%s_%d", name, suffix);
+                flb_sds_destroy(name);
+                name = new_name;
+                flb_plg_debug(ctx->ins, "new file name generated is %s", name);
+                file_exists = flb_fstore_file_exists(ctx->fs, name);
+                suffix++;
+            }
+
+            if (!name) {
+                flb_plg_error(ctx->ins, "could not generate chunk file name");
+                return -1;
+            }
+
+            flb_plg_debug(ctx->ins, "[azure_kusto] new buffer file: %s", name);
+
+            /* Create the file */
+            fsf = flb_fstore_file_create(ctx->fs, ctx->stream_active, name, bytes);
+            if (!fsf) {
+                flb_plg_error(ctx->ins, "could not create the file '%s' in the store",
+                              name);
+                flb_sds_destroy(name);
+                return -1;
+            }
+            flb_sds_destroy(name);
+
+            /* Write tag as metadata */
+            ret = flb_fstore_file_meta_set(ctx->fs, fsf, (char *) tag, tag_len);
+            if (ret == -1) {
+                flb_plg_error(ctx->ins, "error writing tag metadata");
+                flb_plg_warn(ctx->ins, "Deleting buffer file because metadata could not be written");
+                flb_fstore_file_delete(ctx->fs, fsf);
+                return -1;
+            }
+
+            /* Allocate local context */
+            azure_kusto_file = flb_calloc(1, sizeof(struct azure_kusto_file));
+            if (!azure_kusto_file) {
+                flb_errno();
+                flb_plg_error(ctx->ins, "cannot allocate azure_kusto file context");
+                flb_plg_warn(ctx->ins, "Deleting buffer file because azure_kusto context creation failed");
+                flb_fstore_file_delete(ctx->fs, fsf);
+                return -1;
+            }
+            azure_kusto_file->fsf = fsf;
+            azure_kusto_file->first_log_time = file_first_log_time;
+            azure_kusto_file->create_time = time(NULL);
+        }
+
         fsf = azure_kusto_file->fsf;
     }
 
