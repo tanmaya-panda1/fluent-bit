@@ -68,8 +68,8 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
     struct mk_list *tmp;
     struct flb_fstore_file *fsf = NULL;
     struct azure_kusto_file *azure_kusto_file;
-    char *large_file_dir = "large_files";
-    char large_file_path[PATH_MAX];
+    char upload_prefix[] = "upload_";
+    char new_file_name[PATH_MAX];
 
     /*
      * Based in the current ctx->stream_name, locate a candidate file to
@@ -107,12 +107,14 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
 
         /* move files larger than 100MB to a different directory */
         if (azure_kusto_file->size > 100 * 1024 * 1024) {
-            flb_plg_debug(ctx->ins, "File '%s' is larger than 100MB, moving to large files directory", fsf->name);
-            snprintf(large_file_path, sizeof(large_file_path), "%s/%s/%s", ctx->fs->root_path, large_file_dir, fsf->name);
-            if (rename(fsf->name, large_file_path) != 0) {
-                flb_plg_error(ctx->ins, "Failed to move file '%s' to large files directory", fsf->name);
+            flb_plg_debug(ctx->ins, "File '%s' is larger than 100MB, renaming with upload_ prefix", fsf->name);
+            snprintf(new_file_name, sizeof(new_file_name), "%s%s", upload_prefix, fsf->name);
+            if (rename(fsf->name, new_file_name) != 0) {
+                flb_plg_error(ctx->ins, "Failed to rename file '%s' with upload_ prefix", fsf->name);
             } else {
-                flb_plg_debug(ctx->ins, "Moved file '%s' to large files directory", fsf->name);
+                flb_plg_debug(ctx->ins, "Renamed file '%s' to '%s'", fsf->name, new_file_name);
+                flb_sds_destroy(fsf->name);
+                fsf->name = flb_sds_create(new_file_name);
             }
             fsf = NULL;
             continue;
