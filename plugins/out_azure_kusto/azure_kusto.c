@@ -1192,7 +1192,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                 //upload_file = NULL;
             }else{
                 flb_plg_error(ctx->ins, "unable to ingest file ");
-                FLB_OUTPUT_RETURN(FLB_RETRY);
+                FLB_OUTPUT_RETURN(FLB_ERROR);
             }
             flb_plg_info(ctx->ins, "this chunk of size is lost %zu",
                          json_size);
@@ -1209,11 +1209,11 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         if (ret == 0) {
             flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
-            flb_sds_destroy(json);
+            //flb_sds_destroy(json);
             FLB_OUTPUT_RETURN(FLB_OK);
         } else {
             flb_plg_error(ctx->ins, "failed to buffer chunk %s", event_chunk->tag);
-            flb_sds_destroy(json);
+            //flb_sds_destroy(json);
             FLB_OUTPUT_RETURN(FLB_ERROR);
         }
 
