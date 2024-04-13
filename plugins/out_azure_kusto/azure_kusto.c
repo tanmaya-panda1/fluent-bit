@@ -1185,11 +1185,15 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                       flb_sds_len(event_chunk->tag));
             if (ret == 0){
                 flb_plg_debug(ctx->ins, "successfully ingested and deleted file %s with size %zu", upload_file->fsf->name, upload_file->size);
-                azure_kusto_store_file_delete(ctx, upload_file);
-                upload_file = NULL;
-            }
-            if (ret < 0) {
-                FLB_OUTPUT_RETURN(FLB_ERROR);
+                ret = azure_kusto_store_file_delete(ctx, upload_file);
+                if (ret != 0){
+                    flb_plg_error(ctx->ins, "unable to delete file ");
+                    FLB_OUTPUT_RETURN(FLB_ERROR);
+                }
+                //upload_file = NULL;
+            }else{
+                flb_plg_error(ctx->ins, "unable to ingest file ");
+                FLB_OUTPUT_RETURN(FLB_RETRY);
             }
             FLB_OUTPUT_RETURN(ret);
         }
@@ -1199,7 +1203,11 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                            event_chunk->tag, flb_sds_len(event_chunk->tag),
                            file_first_log_time);
 
-        if (ret < 0) {
+        if (ret == 0) {
+            flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
+            FLB_OUTPUT_RETURN(FLB_OK);
+        } else {
+            flb_plg_error(ctx->ins, "failed to buffer chunk %s", event_chunk->tag);
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
 
@@ -1207,7 +1215,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         /* Buffering mode is enabled, call azure_kusto_flush_to_buffer */
         //azure_kusto_flush_to_buffer(json, json_size, event_chunk->tag, tag_len, i_ins, ctx, config);
         //flb_sds_destroy(json);
-        FLB_OUTPUT_RETURN(FLB_OK);
+        //FLB_OUTPUT_RETURN(FLB_OK);
     } else {
         /* Buffering mode is disabled, proceed with regular flush */
         flb_plg_trace(ctx->ins, "payload size before compression %zu", json_size);
