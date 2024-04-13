@@ -1110,7 +1110,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         //flb_plg_debug(ctx->ins,"upload_file retrieved is  ::: %s", upload_file->);
 
         if (upload_file == NULL) {
-            flb_plg_debug(ctx->ins, "upload_file is NULL ");
+            flb_plg_debug(ctx->ins, "upload_file is NULL or size exceeded, creating new file");
             ret = flb_log_event_decoder_init(&log_decoder,
                                              (char *) event_chunk->data,
                                              event_chunk->size);
@@ -1167,14 +1167,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             total_file_size_check = FLB_TRUE;
         }
 
-        /* Buffer current chunk in filesystem and wait for next chunk from engine */
-        ret = buffer_chunk(ctx, upload_file, json, json_size,
-                           event_chunk->tag, flb_sds_len(event_chunk->tag),
-                           file_first_log_time);
-
-        if (ret < 0) {
-            FLB_OUTPUT_RETURN(FLB_RETRY);
-        }
 
 
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
@@ -1194,10 +1186,21 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             if (ret == 0){
                 flb_plg_debug(ctx->ins, "successfully ingested and deleted file %s ", upload_file->fsf->name);
                 azure_kusto_store_file_delete(ctx, upload_file);
+                upload_file = NULL
             }
             if (ret < 0) {
                 FLB_OUTPUT_RETURN(FLB_ERROR);
             }
+            //FLB_OUTPUT_RETURN(ret);
+        }
+
+        /* Buffer current chunk in filesystem and wait for next chunk from engine */
+        ret = buffer_chunk(ctx, upload_file, json, json_size,
+                           event_chunk->tag, flb_sds_len(event_chunk->tag),
+                           file_first_log_time);
+
+        if (ret < 0) {
+            FLB_OUTPUT_RETURN(FLB_RETRY);
         }
 
 
