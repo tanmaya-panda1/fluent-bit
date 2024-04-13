@@ -1196,7 +1196,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             }
             flb_plg_info(ctx->ins, "this chunk of size is lost %zu",
                          json_size);
-            FLB_OUTPUT_RETURN(ret);
+            FLB_OUTPUT_RETURN(FLB_OK);
         }
 
         flb_plg_info(ctx->ins, "before sending to buffer chunk %s",
