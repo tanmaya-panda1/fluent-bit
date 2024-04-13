@@ -1184,6 +1184,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             if (ret == 0){
                 flb_plg_debug(ctx->ins, "successfully ingested and deleted file %s ", upload_file->file_path);
                 azure_kusto_store_file_delete(ctx, upload_file);
+                upload_file = NULL;
             }
             if (ret < 0) {
                 FLB_OUTPUT_RETURN(FLB_ERROR);
