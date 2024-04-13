@@ -1168,16 +1168,16 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         }
 
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
-        /*if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
+        if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
             flb_plg_trace(ctx->ins, "before loading ingestion resources xxxx ");
-            *//* Load or refresh ingestion resources *//*
+            /* Load or refresh ingestion resources */
             ret = azure_kusto_load_ingestion_resources(ctx, config);
             if (ret != 0) {
                 flb_plg_error(ctx->ins, "cannot load ingestion resources");
                 FLB_OUTPUT_RETURN(FLB_ERROR);
             }
 
-            *//* Send upload directly without upload queue *//*
+            /* Send upload directly without upload queue */
             ret = ingest_to_kusto_ext(ctx, json, upload_file,
                                       event_chunk->tag,
                                       flb_sds_len(event_chunk->tag));
@@ -1189,7 +1189,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                 FLB_OUTPUT_RETURN(FLB_ERROR);
             }
             FLB_OUTPUT_RETURN(ret);
-        }*/
+        }
 
         /* Buffer current chunk in filesystem and wait for next chunk from engine */
         ret = buffer_chunk(ctx, upload_file, json, json_size,
