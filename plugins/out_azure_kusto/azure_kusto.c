@@ -1167,24 +1167,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             total_file_size_check = FLB_TRUE;
         }
 
-        flb_plg_info(ctx->ins, "before sending to buffer chunk %s",
-                     event_chunk->tag);
-
-        /* Buffer current chunk in filesystem and wait for next chunk from engine */
-        ret = buffer_chunk(ctx, upload_file, json, json_size,
-                           event_chunk->tag, flb_sds_len(event_chunk->tag),
-                           file_first_log_time);
-
-        if (ret == 0) {
-            flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
-            //flb_sds_destroy(json);
-            //FLB_OUTPUT_RETURN(FLB_OK);
-        } else {
-            flb_plg_error(ctx->ins, "failed to buffer chunk %s", event_chunk->tag);
-            //flb_sds_destroy(json);
-            FLB_OUTPUT_RETURN(FLB_RETRY);
-        }
-
 
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
         if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
@@ -1212,14 +1194,34 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                 flb_plg_error(ctx->ins, "unable to ingest file ");
                 FLB_OUTPUT_RETURN(FLB_RETRY);
             }
-           // FLB_OUTPUT_RETURN(ret);
+            flb_plg_info(ctx->ins, "this chunk of size is lost %zu",
+                         json_size);
+            FLB_OUTPUT_RETURN(ret);
+        }
+
+        flb_plg_info(ctx->ins, "before sending to buffer chunk %s",
+                     event_chunk->tag);
+
+        /* Buffer current chunk in filesystem and wait for next chunk from engine */
+        ret = buffer_chunk(ctx, upload_file, json, json_size,
+                           event_chunk->tag, flb_sds_len(event_chunk->tag),
+                           file_first_log_time);
+
+        if (ret == 0) {
+            flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
+            flb_sds_destroy(json);
+            FLB_OUTPUT_RETURN(FLB_OK);
+        } else {
+            flb_plg_error(ctx->ins, "failed to buffer chunk %s", event_chunk->tag);
+            flb_sds_destroy(json);
+            FLB_OUTPUT_RETURN(FLB_ERROR);
         }
 
 
         /* Buffering mode is enabled, call azure_kusto_flush_to_buffer */
         //azure_kusto_flush_to_buffer(json, json_size, event_chunk->tag, tag_len, i_ins, ctx, config);
-        flb_sds_destroy(json);
-        FLB_OUTPUT_RETURN(FLB_OK);
+        //flb_sds_destroy(json);
+        //FLB_OUTPUT_RETURN(FLB_OK);
     } else {
         /* Buffering mode is disabled, proceed with regular flush */
         flb_plg_trace(ctx->ins, "payload size before compression %zu", json_size);
