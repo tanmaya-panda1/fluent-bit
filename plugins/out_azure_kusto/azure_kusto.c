@@ -1168,7 +1168,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         }
 
 
-
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
         if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
             flb_plg_trace(ctx->ins, "before loading ingestion resources xxxx ");
@@ -1195,7 +1194,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                 flb_plg_error(ctx->ins, "unable to ingest file ");
                 FLB_OUTPUT_RETURN(FLB_RETRY);
             }
-            FLB_OUTPUT_RETURN(ret);
+           // FLB_OUTPUT_RETURN(ret);
         }
 
         /* Buffer current chunk in filesystem and wait for next chunk from engine */
@@ -1205,9 +1204,11 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         if (ret == 0) {
             flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
+            flb_sds_destroy(json);
             FLB_OUTPUT_RETURN(FLB_OK);
         } else {
             flb_plg_error(ctx->ins, "failed to buffer chunk %s", event_chunk->tag);
+            flb_sds_destroy(json);
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
 
@@ -1263,10 +1264,10 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         if (is_compressed == FLB_TRUE) {
             flb_free(final_payload);
         }
-    }
 
-    /* Done */
-    FLB_OUTPUT_RETURN(FLB_OK);
+        /* Done */
+        FLB_OUTPUT_RETURN(FLB_OK);
+    }
 }
 
 
