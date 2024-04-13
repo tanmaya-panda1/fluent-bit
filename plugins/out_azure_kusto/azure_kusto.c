@@ -1191,7 +1191,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             if (ret < 0) {
                 FLB_OUTPUT_RETURN(FLB_ERROR);
             }
-            //FLB_OUTPUT_RETURN(ret);
+            FLB_OUTPUT_RETURN(ret);
         }
 
         /* Buffer current chunk in filesystem and wait for next chunk from engine */
