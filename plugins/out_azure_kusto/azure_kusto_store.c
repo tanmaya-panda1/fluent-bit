@@ -179,7 +179,8 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
     flb_plg_error(ctx->ins, "inside azure_kusto_store_buffer_put function");
 
     /* If no target file was found, create a new one */
-    if (!azure_kusto_file) {
+    if (!azure_kusto_file || azure_kusto_file == NULL) {
+        flb_plg_error(ctx->ins, "inside azure_kusto_store_buffer_put function :: inside azure_kusto_file == NULL");
         //name = gen_store_filename(tag);
         name = flb_sds_create_len(tag, tag_len);
         if (!name) {
