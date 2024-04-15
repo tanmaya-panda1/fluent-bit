@@ -1173,11 +1173,11 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         }
 
         /* Buffer current chunk in filesystem and wait for next chunk from engine */
-        ret = buffer_chunk(ctx, upload_file, json, json_size,
+        /*ret = buffer_chunk(ctx, upload_file, json, json_size,
                            event_chunk->tag, flb_sds_len(event_chunk->tag),
                            file_first_log_time);
 
-        flb_plg_debug(ctx->ins, "after buffered chunk %s", event_chunk->tag);
+        flb_plg_debug(ctx->ins, "after buffered chunk %s", event_chunk->tag);*/
 
         if (ret == 0) {
             flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
@@ -1193,7 +1193,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
         if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
-            flb_plg_trace(ctx->ins, "before loading ingestion resources xxxx ");
+            flb_plg_trace(ctx->ins, "before loading ingestion resources xxxx with chunk size %zu", json_size);
             /* Load or refresh ingestion resources */
             ret = azure_kusto_load_ingestion_resources(ctx, config);
             if (ret != 0) {
@@ -1224,9 +1224,9 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         }
 
         /*flb_plg_info(ctx->ins, "before sending to buffer chunk %s",
-                     event_chunk->tag);
+                     event_chunk->tag); */
 
-        *//* Buffer current chunk in filesystem and wait for next chunk from engine *//*
+        // Buffer current chunk in filesystem and wait for next chunk from engine
         ret = buffer_chunk(ctx, upload_file, json, json_size,
                            event_chunk->tag, flb_sds_len(event_chunk->tag),
                            file_first_log_time);
