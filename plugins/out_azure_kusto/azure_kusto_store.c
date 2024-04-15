@@ -198,7 +198,7 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
             flb_sds_destroy(name);
             return -1;
         }
-        flb_sds_destroy(name);
+        //flb_sds_destroy(name);
 
         /* Write tag as metadata */
         ret = flb_fstore_file_meta_set(ctx->fs, fsf, (char *) tag, tag_len);
