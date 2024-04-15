@@ -1090,7 +1090,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
     /* Reformat msgpack to JSON payload */
     ret = azure_kusto_format(ctx, event_chunk->tag, tag_len, event_chunk->data,
                              event_chunk->size, (void **)&json, &json_size);
-    flb_plg_trace(ctx->ins, "after kusto format xxxx %d", ret);
+    flb_plg_trace(ctx->ins, "after kusto format json_size is  %zu", json_size);
     if (ret != 0) {
         flb_plg_error(ctx->ins, "cannot reformat data into json");
         FLB_OUTPUT_RETURN(FLB_RETRY);
@@ -1116,7 +1116,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         if (upload_file == NULL) {
             flb_plg_debug(ctx->ins, "upload_file is NULL or size exceeded, creating new file");
-            ret = flb_log_event_decoder_init(&log_decoder,
+            /*ret = flb_log_event_decoder_init(&log_decoder,
                                              (char *) event_chunk->data,
                                              event_chunk->size);
 
@@ -1138,7 +1138,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                 }
             }
 
-            flb_log_event_decoder_destroy(&log_decoder);
+            flb_log_event_decoder_destroy(&log_decoder);*/
         }
         else {
             /* Get file_first_log_time from upload_file */
