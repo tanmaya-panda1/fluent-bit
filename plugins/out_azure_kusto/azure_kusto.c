@@ -550,7 +550,7 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
     size_t buffer_size;
     struct flb_azure_kusto *ctx = out_context;
     flb_sds_t payload;
-    flb_sds_t tag_sds = flb_sds_create(tag);
+    flb_sds_t tag_sds = flb_sds_create_len(tag, tag_len);
 
     flb_plg_trace(ctx->ins, "inside ingest_to_kusto_ext ");
 
@@ -563,7 +563,7 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
         return -1;
     }
 
-    payload = flb_sds_create(buffer);
+    payload = flb_sds_create_len(buffer, buffer_size);
 
     //ret = azure_kusto_load_ingestion_resources(ctx, config);
     //if (ret != 0) {
