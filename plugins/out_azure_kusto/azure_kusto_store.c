@@ -294,11 +294,12 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
     }
 
     /* Append data to the target file */
-    ret = flb_fstore_file_append(fsf, data, bytes);
+    ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
     if (ret != 0) {
         flb_plg_error(ctx->ins, "error writing data to local azure_kusto file");
         return -1;
     }
+
     azure_kusto_file->size += bytes;
     ctx->current_buffer_size += bytes;
 
