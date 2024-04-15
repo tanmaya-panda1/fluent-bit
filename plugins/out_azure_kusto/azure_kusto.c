@@ -406,7 +406,7 @@ static int upload_data(struct flb_azure_kusto *ctx, struct azure_kusto_file *chu
  * Either new_data or chunk can be NULL, but not both
  */
 static int construct_request_buffer(struct flb_azure_kusto *ctx, flb_sds_t new_data,
-                                    struct azure_kusto_file *chunk,
+                                    struct azure_kusto_file *upload_file,
                                     char **out_buf, size_t *out_size)
 {
     char *body;
@@ -416,27 +416,29 @@ static int construct_request_buffer(struct flb_azure_kusto *ctx, flb_sds_t new_d
     size_t buffer_size = 0;
     int ret;
 
-    if (new_data == NULL && chunk == NULL) {
+    if (new_data == NULL && upload_file == NULL) {
         flb_plg_error(ctx->ins, "[construct_request_buffer] Something went wrong"
                                 " both chunk and new_data are NULL");
         return -1;
     }
 
-    if (chunk) {
-        ret = azure_kusto_store_file_read(ctx, chunk, &buffered_data, &buffer_size);
+    if (upload_file) {
+        ret = azure_kusto_store_file_upload_read(ctx, upload_file->fsf, &buffered_data, &buffer_size);
         if (ret < 0) {
             flb_plg_error(ctx->ins, "Could not read locally buffered data %s",
-                          chunk->file_path);
+                          upload_file->file_path);
             return -1;
         }
 
         /*
-         * lock the chunk from buffer list
+         * lock the upload_file from buffer list
          */
-        azure_kusto_store_file_lock(chunk);
+        azure_kusto_store_file_lock(upload_file);
         body = buffered_data;
         body_size = buffer_size;
     }
+
+    flb_plg_debug(ctx->ins, "[construct_request_buffer] size of buffer file read %zu", buffer_size);
 
     /*
      * If new data is arriving, increase the original 'buffered_data' size
@@ -444,13 +446,14 @@ static int construct_request_buffer(struct flb_azure_kusto *ctx, flb_sds_t new_d
      */
     if (new_data) {
         body_size += flb_sds_len(new_data);
+        flb_plg_debug(ctx->ins, "[construct_request_buffer] size of new_data %zu", body_size);
 
         tmp = flb_realloc(buffered_data, body_size + 1);
         if (!tmp) {
             flb_errno();
             flb_free(buffered_data);
-            if (chunk) {
-                azure_kusto_store_file_unlock(chunk);
+            if (upload_file) {
+                azure_kusto_store_file_unlock(upload_file);
             }
             return -1;
         }
@@ -458,6 +461,8 @@ static int construct_request_buffer(struct flb_azure_kusto *ctx, flb_sds_t new_d
         memcpy(body + buffer_size, new_data, flb_sds_len(new_data));
         body[body_size] = '\0';
     }
+
+    flb_plg_debug(ctx->ins, "[construct_request_buffer] final increased %zu", body_size);
 
     *out_buf = body;
     *out_size = body_size;
@@ -536,7 +541,7 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
 }
 
 // Timer callback to ingest data to Azure Kusto
-static int ingest_to_kusto_ext(void *out_context, flb_sds_t chunk,
+static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
                                struct azure_kusto_file *upload_file,
                                const char *tag, int tag_len)
 {
@@ -550,8 +555,8 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t chunk,
     flb_plg_trace(ctx->ins, "inside ingest_to_kusto_ext ");
 
     /* Create buffer to upload to S3 */
-    ret = construct_request_buffer(ctx, chunk, upload_file, &buffer, &buffer_size);
-    flb_sds_destroy(chunk);
+    ret = construct_request_buffer(ctx, new_data, upload_file, &buffer, &buffer_size);
+    flb_sds_destroy(new_data);
     if (ret < 0) {
         flb_plg_error(ctx->ins, "Could not construct request buffer for %s",
                       upload_file->file_path);
