@@ -1239,7 +1239,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             flb_plg_error(ctx->ins, "failed to buffer chunk %s", event_chunk->tag);
             //flb_sds_destroy(json);
             FLB_OUTPUT_RETURN(FLB_ERROR);
-        }*/
+        }
 
 
         /* Buffering mode is enabled, call azure_kusto_flush_to_buffer */
