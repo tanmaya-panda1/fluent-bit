@@ -1167,6 +1167,21 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             total_file_size_check = FLB_TRUE;
         }
 
+        /* Buffer current chunk in filesystem and wait for next chunk from engine */
+        ret = buffer_chunk(ctx, upload_file, json, json_size,
+                           event_chunk->tag, flb_sds_len(event_chunk->tag),
+                           file_first_log_time);
+
+        if (ret == 0) {
+            flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
+            //flb_sds_destroy(json);
+            //FLB_OUTPUT_RETURN(FLB_OK);
+        } else {
+            flb_plg_error(ctx->ins, "failed to buffer chunk %s", event_chunk->tag);
+            //flb_sds_destroy(json);
+            FLB_OUTPUT_RETURN(FLB_ERROR);
+        }
+
 
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
         if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
@@ -1200,10 +1215,10 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             FLB_OUTPUT_RETURN(FLB_OK);
         }
 
-        flb_plg_info(ctx->ins, "before sending to buffer chunk %s",
+        /*flb_plg_info(ctx->ins, "before sending to buffer chunk %s",
                      event_chunk->tag);
 
-        /* Buffer current chunk in filesystem and wait for next chunk from engine */
+        *//* Buffer current chunk in filesystem and wait for next chunk from engine *//*
         ret = buffer_chunk(ctx, upload_file, json, json_size,
                            event_chunk->tag, flb_sds_len(event_chunk->tag),
                            file_first_log_time);
@@ -1216,7 +1231,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             flb_plg_error(ctx->ins, "failed to buffer chunk %s", event_chunk->tag);
             //flb_sds_destroy(json);
             FLB_OUTPUT_RETURN(FLB_ERROR);
-        }
+        }*/
 
 
         /* Buffering mode is enabled, call azure_kusto_flush_to_buffer */
