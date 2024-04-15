@@ -1202,8 +1202,8 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                       flb_sds_len(event_chunk->tag));
             if (ret == 0){
                 flb_plg_debug(ctx->ins, "successfully ingested and deleted file %s with size %zu", upload_file->fsf->name, upload_file->size);
-                //ret = azure_kusto_store_file_delete(ctx, upload_file);
-                ret = azure_kusto_store_file_upload_delete(ctx, upload_file->fsf);
+                ret = azure_kusto_store_file_delete(ctx, upload_file);
+                //ret = azure_kusto_store_file_upload_delete(ctx, upload_file->fsf);
                 if (ret != 0){
                     flb_plg_error(ctx->ins, "unable to delete file ");
                     FLB_OUTPUT_RETURN(FLB_ERROR);
