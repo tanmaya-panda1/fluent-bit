@@ -404,7 +404,19 @@ static int upload_data(struct flb_azure_kusto *ctx, struct azure_kusto_file *chu
 
 
 static void add_comma_to_beginning(flb_sds_t *data) {
-    *data = flb_sds_prepend(*data, ",", 1);
+    size_t len = flb_sds_len(*data);
+
+    // Resize the string to accommodate the comma
+    *data = flb_sds_increase(*data, 1);
+
+    // Shift the existing characters to the right by one position
+    memmove(*data + 1, *data, len);
+
+    // Add the comma at the beginning
+    (*data)[0] = ',';
+
+    // Update the string length
+    flb_sds_len_set(*data, len + 1);
 }
 
 /*
