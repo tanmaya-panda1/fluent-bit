@@ -162,7 +162,7 @@ int flb_fstore_file_exists(struct flb_fstore *fs, flb_sds_t name)
 /* Append data to a new or existing fstore file */
 int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file,
                         const char *tag, int tag_len,
-                        char *data, size_t bytes,
+                        flb_sds_t data, size_t bytes,
                         time_t file_first_log_time)
 {
     int ret;
@@ -291,6 +291,16 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         }*/
         fsf = azure_kusto_file->fsf;
 
+    }
+
+    /* Remove the closing bracket from the previous JSON array */
+    if (bytes >= 2 && data[0] == '[' && data[bytes - 1] == ']') {
+        flb_plg_debug(ctx->ins, "[azure_kusto] before removing [] %zu",bytes);
+        // Shift the characters to the left by one position
+        memmove(data, data + 1, bytes - 2);
+        flb_sds_len_set(data, bytes - 2);
+        bytes = bytes - 2;
+        flb_plg_debug(ctx->ins, "[azure_kusto] after removing [] %zu",bytes);
     }
 
     /* Append data to the target file */

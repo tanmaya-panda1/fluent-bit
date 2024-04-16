@@ -540,6 +540,15 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
 
 }
 
+void add_brackets_sds(flb_sds_t *data) {
+    flb_sds_t tmp = flb_sds_create("[");
+    tmp = flb_sds_cat(tmp, *data, flb_sds_len(*data));
+    tmp = flb_sds_cat(tmp, "]", 1);
+
+    flb_sds_destroy(*data);
+    *data = tmp;
+}
+
 // Timer callback to ingest data to Azure Kusto
 static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
                                struct azure_kusto_file *upload_file,
@@ -564,6 +573,8 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
     }
 
     payload = flb_sds_create_len(buffer, buffer_size);
+
+    add_brackets_sds(&payload);
 
     //ret = azure_kusto_load_ingestion_resources(ctx, config);
     //if (ret != 0) {
@@ -760,6 +771,128 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
     flb_output_upstream_set(ctx->u, ins);
 
     flb_plg_debug(ctx->ins, "azure kusto init completed");
+
+    return 0;
+}
+
+static int azure_kusto_format_ext(struct flb_azure_kusto *ctx, const char *tag, int tag_len,
+                              const void *data, size_t bytes, flb_sds_t *out_buf)
+{
+    int records = 0;
+    msgpack_sbuffer mp_sbuf;
+    msgpack_packer mp_pck;
+    /* for sub msgpack objs */
+    int map_size;
+    struct tm tms;
+    char time_formatted[32];
+    size_t s;
+    int len;
+    struct flb_log_event_decoder log_decoder;
+    struct flb_log_event         log_event;
+    int                          ret;
+    /* output buffer */
+    flb_sds_t json_buf;
+
+    /* Create array for all records */
+    records = flb_mp_count(data, bytes);
+    if (records <= 0) {
+        flb_plg_error(ctx->ins, "error counting msgpack entries");
+        return -1;
+    }
+
+    ret = flb_log_event_decoder_init(&log_decoder, (char *) data, bytes);
+
+    if (ret != FLB_EVENT_DECODER_SUCCESS) {
+        flb_plg_error(ctx->ins,
+                      "Log event decoder initialization error : %d", ret);
+
+        return -1;
+    }
+
+    /* Create temporary msgpack buffer */
+    msgpack_sbuffer_init(&mp_sbuf);
+    msgpack_packer_init(&mp_pck, &mp_sbuf, msgpack_sbuffer_write);
+
+    msgpack_pack_array(&mp_pck, records);
+
+    while ((ret = flb_log_event_decoder_next(
+            &log_decoder,
+            &log_event)) == FLB_EVENT_DECODER_SUCCESS) {
+        map_size = 1;
+        if (ctx->include_time_key == FLB_TRUE) {
+            map_size++;
+        }
+
+        if (ctx->include_tag_key == FLB_TRUE) {
+            map_size++;
+        }
+
+        msgpack_pack_map(&mp_pck, map_size);
+
+        /* include_time_key */
+        if (ctx->include_time_key == FLB_TRUE) {
+            msgpack_pack_str(&mp_pck, flb_sds_len(ctx->time_key));
+            msgpack_pack_str_body(&mp_pck, ctx->time_key, flb_sds_len(ctx->time_key));
+
+            /* Append the time value as ISO 8601 */
+            gmtime_r(&log_event.timestamp.tm.tv_sec, &tms);
+            s = strftime(time_formatted, sizeof(time_formatted) - 1,
+                         FLB_PACK_JSON_DATE_ISO8601_FMT, &tms);
+
+            len = snprintf(time_formatted + s, sizeof(time_formatted) - 1 - s,
+                           ".%03" PRIu64 "Z",
+                    (uint64_t)log_event.timestamp.tm.tv_nsec / 1000000);
+            s += len;
+            msgpack_pack_str(&mp_pck, s);
+            msgpack_pack_str_body(&mp_pck, time_formatted, s);
+        }
+
+        /* include_tag_key */
+        if (ctx->include_tag_key == FLB_TRUE) {
+            msgpack_pack_str(&mp_pck, flb_sds_len(ctx->tag_key));
+            msgpack_pack_str_body(&mp_pck, ctx->tag_key, flb_sds_len(ctx->tag_key));
+            msgpack_pack_str(&mp_pck, tag_len);
+            msgpack_pack_str_body(&mp_pck, tag, tag_len);
+        }
+
+        msgpack_pack_str(&mp_pck, flb_sds_len(ctx->log_key));
+        msgpack_pack_str_body(&mp_pck, ctx->log_key, flb_sds_len(ctx->log_key));
+        msgpack_pack_object(&mp_pck, *log_event.body);
+    }
+
+    /* Convert from msgpack to JSON */
+    json_buf = flb_msgpack_raw_to_json_sds(mp_sbuf.data, mp_sbuf.size);
+
+    /* Cleanup */
+    flb_log_event_decoder_destroy(&log_decoder);
+    msgpack_sbuffer_destroy(&mp_sbuf);
+
+    if (!json_buf) {
+        flb_plg_error(ctx->ins, "error formatting JSON payload");
+        return -1;
+    }
+
+    /* Append the JSON buffer to the output buffer */
+    if (*out_buf == NULL) {
+        *out_buf = flb_sds_create_size(flb_sds_len(json_buf));
+        if (*out_buf == NULL) {
+            flb_plg_error(ctx->ins, "error creating output buffer");
+            flb_sds_destroy(json_buf);
+            return -1;
+        }
+        flb_sds_cat(*out_buf, json_buf, flb_sds_len(json_buf));
+    } else {
+        /* Remove the closing bracket from the previous JSON array */
+        flb_sds_len_set(*out_buf, flb_sds_len(*out_buf) - 1);
+
+        /* Add a comma to separate the arrays */
+        flb_sds_cat(*out_buf, ",", 1);
+
+        /* Append the new JSON array without the opening bracket */
+        flb_sds_cat(*out_buf, json_buf + 1, flb_sds_len(json_buf) - 1);
+    }
+
+    flb_sds_destroy(json_buf);
 
     return 0;
 }
@@ -1059,6 +1192,16 @@ static void flush_init(void *out_context)
     }
 }
 
+static void remove_brackets_sds(flb_sds_t data) {
+    size_t len = flb_sds_len(data);
+
+    if (len >= 2 && data[0] == '[' && data[len - 1] == ']') {
+        // Shift the characters to the left by one position
+        memmove(data, data + 1, len - 2);
+        flb_sds_len_set(data, len - 2);
+    }
+}
+
 static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                  struct flb_output_flush *out_flush,
                                  struct flb_input_instance *i_ins, void *out_context,
@@ -1182,7 +1325,11 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             FLB_OUTPUT_RETURN(FLB_ERROR);
         }
 
-        flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
+        flb_plg_debug(ctx->ins, "before removing data size %zu", flb_sds_len(json));
+
+        remove_brackets_sds(json);
+
+        flb_plg_debug(ctx->ins, "after removing brackets buffered chunk %zu", flb_sds_len(json));
 
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
         if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
@@ -1201,7 +1348,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             if (ret == 0){
                 flb_plg_debug(ctx->ins, "successfully ingested and deleted file %s with size %zu", upload_file->fsf->name, upload_file->size);
                 ret = azure_kusto_store_file_delete(ctx, upload_file);
-                //ret = azure_kusto_store_file_upload_delete(ctx, upload_file->fsf);
                 if (ret != 0){
                     flb_plg_error(ctx->ins, "unable to delete file ");
                     FLB_OUTPUT_RETURN(FLB_ERROR);
