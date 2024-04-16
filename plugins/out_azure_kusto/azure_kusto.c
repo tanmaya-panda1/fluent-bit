@@ -402,6 +402,11 @@ static int upload_data(struct flb_azure_kusto *ctx, struct azure_kusto_file *chu
     return FLB_OK;
 }*/
 
+
+static void add_comma_to_beginning(flb_sds_t *data) {
+    *data = flb_sds_prepend(*data, ",", 1);
+}
+
 /*
  * Either new_data or chunk can be NULL, but not both
  */
@@ -445,6 +450,7 @@ static int construct_request_buffer(struct flb_azure_kusto *ctx, flb_sds_t new_d
      * to append the new one.
      */
     if (new_data) {
+        add_comma_to_beginning(&new_data);
         body_size += flb_sds_len(new_data);
         flb_plg_debug(ctx->ins, "[construct_request_buffer] size of new_data %zu", body_size);
 
@@ -1192,13 +1198,13 @@ static void flush_init(void *out_context)
     }
 }
 
-static void remove_brackets_sds(flb_sds_t data) {
-    size_t len = flb_sds_len(data);
+static void remove_brackets_sds(flb_sds_t *data) {
+    size_t len = flb_sds_len(*data);
 
-    if (len >= 2 && data[0] == '[' && data[len - 1] == ']') {
+    if (len >= 2 && (*data)[0] == '[' && (*data)[len - 1] == ']') {
         // Shift the characters to the left by one position
-        memmove(data, data + 1, len - 2);
-        flb_sds_len_set(data, len - 2);
+        memmove(*data, *data + 1, len - 2);
+        flb_sds_len_set(*data, len - 2);
     }
 }
 
@@ -1327,7 +1333,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         flb_plg_debug(ctx->ins, "before removing data size %zu", flb_sds_len(json));
 
-        remove_brackets_sds(json);
+        remove_brackets_sds(&json);
 
         flb_plg_debug(ctx->ins, "after removing brackets buffered chunk %zu", flb_sds_len(json));
 
