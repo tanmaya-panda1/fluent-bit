@@ -1349,10 +1349,16 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         size_t len = flb_sds_len(json);
         if (len > 0) {
             char first_char = json[0];
+            char first_next_char = json[1];
             char last_char = json[len - 1];
+            char last_but_char = json[len - 2];
+            char last_but_but_char = json[len - 3];
 
-            printf("Before removal First character: '%c'\n", first_char);
-            printf("Before removal Last character: '%c'\n", last_char);
+            flb_plg_debug(ctx->ins,"Before removal First character: '%c'\n", first_char);
+            flb_plg_debug(ctx->ins,"Before removal First Next character: '%c'\n", first_next_char);
+            flb_plg_debug(ctx->ins,"Before removal Last character: '%c'\n", last_char);
+            flb_plg_debug(ctx->ins,"Before removal Last But character: '%c'\n", last_but_char);
+            flb_plg_debug(ctx->ins,"Before removal Last But but character: '%c'\n", last_but_but_char);
         } else {
             printf("JSON string is empty.\n");
         }
@@ -1365,12 +1371,18 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         if (len > 0) {
             char first_char = json[0];
+            char first_next_char = json[1];
             char last_char = json[len - 1];
+            char last_but_char = json[len - 2];
+            char last_but_but_char = json[len - 3];
 
             flb_plg_debug(ctx->ins,"After removal First character: '%c'\n", first_char);
+            flb_plg_debug(ctx->ins,"After removal First Next character: '%c'\n", first_next_char);
             flb_plg_debug(ctx->ins,"After removal Last character: '%c'\n", last_char);
+            flb_plg_debug(ctx->ins,"After removal Last But character: '%c'\n", last_but_char);
+            flb_plg_debug(ctx->ins,"After removal Last But but character: '%c'\n", last_but_but_char);
         } else {
-            flb_plg_debug(ctx->ins,"JSON string is empty.\n");
+            printf("JSON string is empty.\n");
         }
 
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
