@@ -625,7 +625,7 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
         flb_plg_debug(ctx->ins,"Before ingest Last But character: '%c'\n", last_but_char);
         flb_plg_debug(ctx->ins,"Before ingest Last But but character: '%c'\n", last_but_but_char);
     } else {
-        printf("JSON string is empty.\n");
+        flb_plg_debug(ctx->ins,"JSON string is empty.\n");
     }
 
     add_brackets_sds(&payload);
@@ -1270,9 +1270,14 @@ static void remove_brackets_sds(flb_sds_t *data) {
     if (len >= 2 && (*data)[0] == '[' && (*data)[len - 1] == ']') {
         // Shift the characters to the left by one position
         memmove(*data, *data + 1, len - 2);
+        // Set the new length, removing the two bracket characters
         flb_sds_len_set(*data, len - 2);
-        // Add a comma to the end
-        //flb_sds_cat(*data, ",", 1);
+        // Append a comma to the end of the modified string
+        *data = flb_sds_cat(*data, ",", 1);
+        if (*data == NULL) {
+            // Handle possible reallocation failure
+            return;
+        }
     }
 }
 
@@ -1436,7 +1441,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             flb_plg_debug(ctx->ins,"After removal Last But character: '%c'\n", last_but_char);
             flb_plg_debug(ctx->ins,"After removal Last But but character: '%c'\n", last_but_but_char);
         } else {
-            printf("JSON string is empty.\n");
+            flb_plg_debug(ctx->ins,"JSON string is empty.\n");
         }
 
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */

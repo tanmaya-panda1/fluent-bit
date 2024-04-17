@@ -239,7 +239,7 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         bytes = bytes - 2;
         flb_plg_debug(ctx->ins, "[azure_kusto] after removing [] %zu",bytes);
         // Add a comma to the end
-        flb_sds_cat(data, ",", 1);
+        data = flb_sds_cat(data, ",", 1);
         bytes = bytes + 1;
     }
 
