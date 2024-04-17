@@ -562,13 +562,26 @@ void add_brackets_sds(flb_sds_t *data) {
     size_t len = flb_sds_len(*data);
     // Remove trailing comma if present
     if (len > 0 && (*data)[len - 1] == ',') {
-        (*data)[len - 1] = '\0';
-        len--;
+        flb_sds_len_set(*data, len - 1);
     }
     flb_sds_t tmp = flb_sds_create("[");
-    tmp = flb_sds_cat(tmp, *data, flb_sds_len(*data));
-    tmp = flb_sds_cat(tmp, "]", 1);
+    if (!tmp) {
+        return; // Handle allocation failure
+    }
 
+    // Concatenate the existing data (now without the trailing comma)
+    tmp = flb_sds_cat(tmp, *data, flb_sds_len(*data));
+    if (!tmp) {
+        return; // Handle possible reallocation failure
+    }
+
+    // Append the closing bracket
+    tmp = flb_sds_cat(tmp, "]", 1);
+    if (!tmp) {
+        return; // Handle possible reallocation failure
+    }
+
+    // Destroy the old data and update the pointer
     flb_sds_destroy(*data);
     *data = tmp;
 }
