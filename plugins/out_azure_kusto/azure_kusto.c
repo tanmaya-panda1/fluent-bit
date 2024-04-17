@@ -462,7 +462,7 @@ static int construct_request_buffer(struct flb_azure_kusto *ctx, flb_sds_t new_d
      * to append the new one.
      */
     if (new_data) {
-        add_comma_to_beginning(&new_data);
+        //add_comma_to_beginning(&new_data);
         body_size += flb_sds_len(new_data);
         flb_plg_debug(ctx->ins, "[construct_request_buffer] size of new_data %zu", body_size);
 
@@ -1217,6 +1217,8 @@ static void remove_brackets_sds(flb_sds_t *data) {
         // Shift the characters to the left by one position
         memmove(*data, *data + 1, len - 2);
         flb_sds_len_set(*data, len - 2);
+        // Add a comma to the end
+        flb_sds_cat(*data, ",", 1);
     }
 }
 
@@ -1344,10 +1346,32 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         }
 
         flb_plg_debug(ctx->ins, "before removing data size %zu", flb_sds_len(json));
+        size_t len = flb_sds_len(json);
+        if (len > 0) {
+            char first_char = json[0];
+            char last_char = json[len - 1];
+
+            printf("Before removal First character: '%c'\n", first_char);
+            printf("Before removal Last character: '%c'\n", last_char);
+        } else {
+            printf("JSON string is empty.\n");
+        }
 
         remove_brackets_sds(&json);
 
         flb_plg_debug(ctx->ins, "after removing brackets buffered chunk %zu", flb_sds_len(json));
+
+        len = flb_sds_len(json);
+
+        if (len > 0) {
+            char first_char = json[0];
+            char last_char = json[len - 1];
+
+            printf("After removal First character: '%c'\n", first_char);
+            printf("After removal Last character: '%c'\n", last_char);
+        } else {
+            printf("JSON string is empty.\n");
+        }
 
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
         if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
