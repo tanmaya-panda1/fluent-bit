@@ -559,6 +559,12 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
 }
 
 void add_brackets_sds(flb_sds_t *data) {
+    size_t len = flb_sds_len(*data);
+    // Remove trailing comma if present
+    if (len > 0 && (*data)[len - 1] == ',') {
+        (*data)[len - 1] = '\0';
+        len--;
+    }
     flb_sds_t tmp = flb_sds_create("[");
     tmp = flb_sds_cat(tmp, *data, flb_sds_len(*data));
     tmp = flb_sds_cat(tmp, "]", 1);
