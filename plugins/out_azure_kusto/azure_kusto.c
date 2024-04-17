@@ -628,7 +628,7 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
         flb_plg_debug(ctx->ins,"JSON string is empty.\n");
     }
 
-    //add_brackets_sds(&payload);
+    add_brackets_sds(&payload);
 
     size_t pload_len = flb_sds_len(payload);
     if (pload_len > 0) {
@@ -1281,6 +1281,35 @@ static void remove_brackets_sds(flb_sds_t *data) {
     }
 }
 
+
+static flb_sds_t combine_json_arrays(flb_sds_t json1, flb_sds_t json2) {
+    if (!json1 || !json2) {
+        return NULL;
+    }
+
+    // Calculate the new size needed: original lengths minus two (for the '[]') plus one for new comma and new closing bracket
+    size_t new_size = flb_sds_len(json1) + flb_sds_len(json2) - 1;
+
+    // Allocate the new SDS to hold the combined JSON
+    flb_sds_t combined_json = flb_sds_create_size(new_size);
+    if (!combined_json) {
+        return NULL;
+    }
+
+    // Copy the first JSON array minus its closing bracket
+    flb_sds_cat(combined_json, json1, flb_sds_len(json1) - 1);
+
+    // Add a comma to separate the arrays if the second array is not empty
+    if (flb_sds_len(json2) > 2) { // greater than 2 to account for empty "[]"
+        flb_sds_cat(combined_json, ",", 1);
+    }
+
+    // Append the second JSON array minus its opening bracket
+    flb_sds_cat(combined_json, json2 + 1, flb_sds_len(json2) - 1);
+
+    return combined_json;
+}
+
 static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                  struct flb_output_flush *out_flush,
                                  struct flb_input_instance *i_ins, void *out_context,
@@ -1422,7 +1451,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             printf("JSON string is empty.\n");
         }
 
-        remove_brackets_sds(&json);
+        //remove_brackets_sds(&json);
 
         flb_plg_debug(ctx->ins, "after removing brackets buffered chunk %zu", flb_sds_len(json));
 

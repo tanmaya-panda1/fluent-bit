@@ -230,17 +230,28 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
 
     }
 
-    /* Remove the closing bracket from the previous JSON array */
     if (bytes >= 2 && data[0] == '[' && data[bytes - 1] == ']') {
         flb_plg_debug(ctx->ins, "[azure_kusto] before removing [] %zu",bytes);
-        // Shift the characters to the left by one position
+        // Reduce 'bytes' by 1 to remove the ']' at the end
+        bytes--;
+
+        // Perform the shift to remove the '[' at the beginning
         memmove(data, data + 1, bytes - 2);
-        flb_sds_len_set(data, bytes - 2);
-        bytes = bytes - 2;
+        bytes--;  // Adjust bytes to account for the removal of '['
+
+        // Set the new length of the data string
+        flb_sds_len_set(data, bytes);
+
+        flb_plg_debug(ctx->ins, "[azure_kusto] after removing [] %zu", bytes);
+        /*while (bytes > 0 && (data[bytes - 1] == ' ' || data[bytes - 1] == '\n' || data[bytes - 1] == '\t' || data[bytes - 1] == '\0')) {
+            bytes--;
+            flb_sds_len_set(data, bytes);
+        }*/
+
         flb_plg_debug(ctx->ins, "[azure_kusto] after removing [] %zu",bytes);
         // Add a comma to the end
         data = flb_sds_cat(data, ",", 1);
-        bytes = bytes + 1;
+        bytes = flb_sds_len(data);
     }
 
     /* Append data to the target file */
