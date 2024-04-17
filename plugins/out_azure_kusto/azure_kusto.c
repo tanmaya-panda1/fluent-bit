@@ -592,7 +592,42 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
 
     payload = flb_sds_create_len(buffer, buffer_size);
 
+    size_t payload_len = flb_sds_len(payload);
+    if (payload_len > 0) {
+        char first_char = payload[0];
+        char first_next_char = payload[1];
+        char last_char = payload[payload_len - 1];
+        char last_but_char = payload[payload_len - 2];
+        char last_but_but_char = payload[payload_len - 3];
+
+        flb_plg_debug(ctx->ins,"Before ingest First character: '%c'\n", first_char);
+        flb_plg_debug(ctx->ins,"Before ingest First Next character: '%c'\n", first_next_char);
+        flb_plg_debug(ctx->ins,"Before ingest Last character: '%c'\n", last_char);
+        flb_plg_debug(ctx->ins,"Before ingest Last But character: '%c'\n", last_but_char);
+        flb_plg_debug(ctx->ins,"Before ingest Last But but character: '%c'\n", last_but_but_char);
+    } else {
+        printf("JSON string is empty.\n");
+    }
+
     add_brackets_sds(&payload);
+
+    size_t pload_len = flb_sds_len(payload);
+    if (pload_len > 0) {
+        char first_char = payload[0];
+        char first_next_char = payload[1];
+        char last_char = payload[pload_len - 1];
+        char last_but_char = payload[pload_len - 2];
+        char last_but_but_char = payload[pload_len - 3];
+
+        flb_plg_debug(ctx->ins,"After ingest wala First character: '%c'\n", first_char);
+        flb_plg_debug(ctx->ins,"After ingest wala First Next character: '%c'\n", first_next_char);
+        flb_plg_debug(ctx->ins,"After ingest wala Last character: '%c'\n", last_char);
+        flb_plg_debug(ctx->ins,"After ingest wala Last But character: '%c'\n", last_but_char);
+        flb_plg_debug(ctx->ins,"After ingest wala Last But but character: '%c'\n", last_but_but_char);
+    } else {
+        printf("JSON string is empty.\n");
+    }
+
 
     //ret = azure_kusto_load_ingestion_resources(ctx, config);
     //if (ret != 0) {
