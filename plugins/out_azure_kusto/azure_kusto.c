@@ -1272,7 +1272,7 @@ static void remove_brackets_sds(flb_sds_t *data) {
         memmove(*data, *data + 1, len - 2);
         flb_sds_len_set(*data, len - 2);
         // Add a comma to the end
-        flb_sds_cat(*data, ",", 1);
+        //flb_sds_cat(*data, ",", 1);
     }
 }
 
