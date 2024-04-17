@@ -1367,10 +1367,10 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             char first_char = json[0];
             char last_char = json[len - 1];
 
-            printf("After removal First character: '%c'\n", first_char);
-            printf("After removal Last character: '%c'\n", last_char);
+            flb_plg_debug(ctx->ins,"After removal First character: '%c'\n", first_char);
+            flb_plg_debug(ctx->ins,"After removal Last character: '%c'\n", last_char);
         } else {
-            printf("JSON string is empty.\n");
+            flb_plg_debug(ctx->ins,"JSON string is empty.\n");
         }
 
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
