@@ -628,7 +628,7 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
         flb_plg_debug(ctx->ins,"JSON string is empty.\n");
     }
 
-    add_brackets_sds(&payload);
+    //add_brackets_sds(&payload);
 
     size_t pload_len = flb_sds_len(payload);
     if (pload_len > 0) {
