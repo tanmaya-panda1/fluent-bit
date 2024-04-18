@@ -611,48 +611,8 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
 
     payload = flb_sds_create_len(buffer, buffer_size);
 
-    size_t payload_len = flb_sds_len(payload);
-    if (payload_len > 0) {
-        char first_char = payload[0];
-        char first_next_char = payload[1];
-        char last_char = payload[payload_len - 1];
-        char last_but_char = payload[payload_len - 2];
-        char last_but_but_char = payload[payload_len - 3];
-
-        flb_plg_debug(ctx->ins,"Before ingest First character: '%c'\n", first_char);
-        flb_plg_debug(ctx->ins,"Before ingest First Next character: '%c'\n", first_next_char);
-        flb_plg_debug(ctx->ins,"Before ingest Last character: '%c'\n", last_char);
-        flb_plg_debug(ctx->ins,"Before ingest Last But character: '%c'\n", last_but_char);
-        flb_plg_debug(ctx->ins,"Before ingest Last But but character: '%c'\n", last_but_but_char);
-    } else {
-        flb_plg_debug(ctx->ins,"JSON string is empty.\n");
-    }
-
+    /* modify the payload to add brackets and remove trailing comma to make a json array ready for ingestion */
     add_brackets_sds(&payload);
-
-    size_t pload_len = flb_sds_len(payload);
-    if (pload_len > 0) {
-        char first_char = payload[0];
-        char first_next_char = payload[1];
-        char last_char = payload[pload_len - 1];
-        char last_but_char = payload[pload_len - 2];
-        char last_but_but_char = payload[pload_len - 3];
-
-        flb_plg_debug(ctx->ins,"After ingest wala First character: '%c'\n", first_char);
-        flb_plg_debug(ctx->ins,"After ingest wala First Next character: '%c'\n", first_next_char);
-        flb_plg_debug(ctx->ins,"After ingest wala Last character: '%c'\n", last_char);
-        flb_plg_debug(ctx->ins,"After ingest wala Last But character: '%c'\n", last_but_char);
-        flb_plg_debug(ctx->ins,"After ingest wala Last But but character: '%c'\n", last_but_but_char);
-    } else {
-        printf("JSON string is empty.\n");
-    }
-
-
-    //ret = azure_kusto_load_ingestion_resources(ctx, config);
-    //if (ret != 0) {
-    //    flb_plg_error(ctx->ins, "cannot load ingestion resources");
-    //    return -1;
-    //}
 
     // Call azure_kusto_queued_ingestion to ingest the payload
     ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), payload, flb_sds_len(payload));
@@ -1367,7 +1327,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         if (upload_file == NULL) {
             flb_plg_debug(ctx->ins, "upload_file is NULL or size exceeded, creating new file");
-            /*ret = flb_log_event_decoder_init(&log_decoder,
+            ret = flb_log_event_decoder_init(&log_decoder,
                                              (char *) event_chunk->data,
                                              event_chunk->size);
 
@@ -1389,7 +1349,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                 }
             }
 
-            flb_log_event_decoder_destroy(&log_decoder);*/
+            flb_log_event_decoder_destroy(&log_decoder);
         }
         else {
             /* Get file_first_log_time from upload_file */
@@ -1451,10 +1411,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             flb_sds_len_set(json, json_size);
 
             flb_plg_debug(ctx->ins, "[azure_kusto] after removing [] %zu", json_size);
-            //while (bytes > 0 && (data[bytes - 1] == ' ' || data[bytes - 1] == '\n' || data[bytes - 1] == '\t' || data[bytes - 1] == '\0')) {
-            //    bytes--;
-            //    flb_sds_len_set(data, bytes);
-            //}
 
             flb_plg_debug(ctx->ins, "[azure_kusto] after removing [] %zu",json_size);
             // Add a comma to the end

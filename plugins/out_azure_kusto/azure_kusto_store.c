@@ -227,7 +227,6 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
     }
     else {
         fsf = azure_kusto_file->fsf;
-
     }
 
     /*if (bytes >= 2 && data[0] == '[' && data[bytes - 1] == ']') {
