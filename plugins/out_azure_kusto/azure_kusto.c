@@ -1434,44 +1434,35 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         }
 
         flb_plg_debug(ctx->ins, "before removing data size %zu", flb_sds_len(json));
-        size_t len = flb_sds_len(json);
-        if (len > 0) {
-            char first_char = json[0];
-            char first_next_char = json[1];
-            char last_char = json[len - 1];
-            char last_but_char = json[len - 2];
-            char last_but_but_char = json[len - 3];
-
-            flb_plg_debug(ctx->ins,"Before removal First character: '%c'\n", first_char);
-            flb_plg_debug(ctx->ins,"Before removal First Next character: '%c'\n", first_next_char);
-            flb_plg_debug(ctx->ins,"Before removal Last character: '%c'\n", last_char);
-            flb_plg_debug(ctx->ins,"Before removal Last But character: '%c'\n", last_but_char);
-            flb_plg_debug(ctx->ins,"Before removal Last But but character: '%c'\n", last_but_but_char);
-        } else {
-            printf("JSON string is empty.\n");
-        }
 
         //remove_brackets_sds(&json);
 
-        flb_plg_debug(ctx->ins, "after removing brackets buffered chunk %zu", flb_sds_len(json));
 
-        len = flb_sds_len(json);
+        if (json_size >= 2 && json[0] == '[' && json[json_size - 1] == ']') {
+            flb_plg_debug(ctx->ins, "[azure_kusto] before removing [] %zu",json_size);
+            // Reduce 'bytes' by 1 to remove the ']' at the end
+            json_size--;
 
-        if (len > 0) {
-            char first_char = json[0];
-            char first_next_char = json[1];
-            char last_char = json[len - 1];
-            char last_but_char = json[len - 2];
-            char last_but_but_char = json[len - 3];
+            // Perform the shift to remove the '[' at the beginning
+            memmove(json, json + 1, json_size - 2);
+            json_size--;  // Adjust bytes to account for the removal of '['
 
-            flb_plg_debug(ctx->ins,"After removal First character: '%c'\n", first_char);
-            flb_plg_debug(ctx->ins,"After removal First Next character: '%c'\n", first_next_char);
-            flb_plg_debug(ctx->ins,"After removal Last character: '%c'\n", last_char);
-            flb_plg_debug(ctx->ins,"After removal Last But character: '%c'\n", last_but_char);
-            flb_plg_debug(ctx->ins,"After removal Last But but character: '%c'\n", last_but_but_char);
-        } else {
-            flb_plg_debug(ctx->ins,"JSON string is empty.\n");
+            // Set the new length of the data string
+            flb_sds_len_set(json, json_size);
+
+            flb_plg_debug(ctx->ins, "[azure_kusto] after removing [] %zu", json_size);
+            //while (bytes > 0 && (data[bytes - 1] == ' ' || data[bytes - 1] == '\n' || data[bytes - 1] == '\t' || data[bytes - 1] == '\0')) {
+            //    bytes--;
+            //    flb_sds_len_set(data, bytes);
+            //}
+
+            flb_plg_debug(ctx->ins, "[azure_kusto] after removing [] %zu",json_size);
+            // Add a comma to the end
+            json = flb_sds_cat(json, ",", 1);
+            json_size = flb_sds_len(json);
         }
+
+        flb_plg_debug(ctx->ins, "after removing brackets buffered chunk %zu", flb_sds_len(json));
 
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
         if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {

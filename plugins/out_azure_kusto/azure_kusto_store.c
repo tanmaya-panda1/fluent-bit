@@ -230,7 +230,7 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
 
     }
 
-    if (bytes >= 2 && data[0] == '[' && data[bytes - 1] == ']') {
+    /*if (bytes >= 2 && data[0] == '[' && data[bytes - 1] == ']') {
         flb_plg_debug(ctx->ins, "[azure_kusto] before removing [] %zu",bytes);
         // Reduce 'bytes' by 1 to remove the ']' at the end
         bytes--;
@@ -243,16 +243,16 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         flb_sds_len_set(data, bytes);
 
         flb_plg_debug(ctx->ins, "[azure_kusto] after removing [] %zu", bytes);
-        /*while (bytes > 0 && (data[bytes - 1] == ' ' || data[bytes - 1] == '\n' || data[bytes - 1] == '\t' || data[bytes - 1] == '\0')) {
-            bytes--;
-            flb_sds_len_set(data, bytes);
-        }*/
+        //while (bytes > 0 && (data[bytes - 1] == ' ' || data[bytes - 1] == '\n' || data[bytes - 1] == '\t' || data[bytes - 1] == '\0')) {
+        //    bytes--;
+        //    flb_sds_len_set(data, bytes);
+        //}
 
         flb_plg_debug(ctx->ins, "[azure_kusto] after removing [] %zu",bytes);
         // Add a comma to the end
         data = flb_sds_cat(data, ",", 1);
         bytes = flb_sds_len(data);
-    }
+    }*/
 
     /* Append data to the target file */
     ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
