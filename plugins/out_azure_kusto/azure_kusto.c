@@ -807,128 +807,6 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
     return 0;
 }
 
-static int azure_kusto_format_ext(struct flb_azure_kusto *ctx, const char *tag, int tag_len,
-                              const void *data, size_t bytes, flb_sds_t *out_buf)
-{
-    int records = 0;
-    msgpack_sbuffer mp_sbuf;
-    msgpack_packer mp_pck;
-    /* for sub msgpack objs */
-    int map_size;
-    struct tm tms;
-    char time_formatted[32];
-    size_t s;
-    int len;
-    struct flb_log_event_decoder log_decoder;
-    struct flb_log_event         log_event;
-    int                          ret;
-    /* output buffer */
-    flb_sds_t json_buf;
-
-    /* Create array for all records */
-    records = flb_mp_count(data, bytes);
-    if (records <= 0) {
-        flb_plg_error(ctx->ins, "error counting msgpack entries");
-        return -1;
-    }
-
-    ret = flb_log_event_decoder_init(&log_decoder, (char *) data, bytes);
-
-    if (ret != FLB_EVENT_DECODER_SUCCESS) {
-        flb_plg_error(ctx->ins,
-                      "Log event decoder initialization error : %d", ret);
-
-        return -1;
-    }
-
-    /* Create temporary msgpack buffer */
-    msgpack_sbuffer_init(&mp_sbuf);
-    msgpack_packer_init(&mp_pck, &mp_sbuf, msgpack_sbuffer_write);
-
-    msgpack_pack_array(&mp_pck, records);
-
-    while ((ret = flb_log_event_decoder_next(
-            &log_decoder,
-            &log_event)) == FLB_EVENT_DECODER_SUCCESS) {
-        map_size = 1;
-        if (ctx->include_time_key == FLB_TRUE) {
-            map_size++;
-        }
-
-        if (ctx->include_tag_key == FLB_TRUE) {
-            map_size++;
-        }
-
-        msgpack_pack_map(&mp_pck, map_size);
-
-        /* include_time_key */
-        if (ctx->include_time_key == FLB_TRUE) {
-            msgpack_pack_str(&mp_pck, flb_sds_len(ctx->time_key));
-            msgpack_pack_str_body(&mp_pck, ctx->time_key, flb_sds_len(ctx->time_key));
-
-            /* Append the time value as ISO 8601 */
-            gmtime_r(&log_event.timestamp.tm.tv_sec, &tms);
-            s = strftime(time_formatted, sizeof(time_formatted) - 1,
-                         FLB_PACK_JSON_DATE_ISO8601_FMT, &tms);
-
-            len = snprintf(time_formatted + s, sizeof(time_formatted) - 1 - s,
-                           ".%03" PRIu64 "Z",
-                    (uint64_t)log_event.timestamp.tm.tv_nsec / 1000000);
-            s += len;
-            msgpack_pack_str(&mp_pck, s);
-            msgpack_pack_str_body(&mp_pck, time_formatted, s);
-        }
-
-        /* include_tag_key */
-        if (ctx->include_tag_key == FLB_TRUE) {
-            msgpack_pack_str(&mp_pck, flb_sds_len(ctx->tag_key));
-            msgpack_pack_str_body(&mp_pck, ctx->tag_key, flb_sds_len(ctx->tag_key));
-            msgpack_pack_str(&mp_pck, tag_len);
-            msgpack_pack_str_body(&mp_pck, tag, tag_len);
-        }
-
-        msgpack_pack_str(&mp_pck, flb_sds_len(ctx->log_key));
-        msgpack_pack_str_body(&mp_pck, ctx->log_key, flb_sds_len(ctx->log_key));
-        msgpack_pack_object(&mp_pck, *log_event.body);
-    }
-
-    /* Convert from msgpack to JSON */
-    json_buf = flb_msgpack_raw_to_json_sds(mp_sbuf.data, mp_sbuf.size);
-
-    /* Cleanup */
-    flb_log_event_decoder_destroy(&log_decoder);
-    msgpack_sbuffer_destroy(&mp_sbuf);
-
-    if (!json_buf) {
-        flb_plg_error(ctx->ins, "error formatting JSON payload");
-        return -1;
-    }
-
-    /* Append the JSON buffer to the output buffer */
-    if (*out_buf == NULL) {
-        *out_buf = flb_sds_create_size(flb_sds_len(json_buf));
-        if (*out_buf == NULL) {
-            flb_plg_error(ctx->ins, "error creating output buffer");
-            flb_sds_destroy(json_buf);
-            return -1;
-        }
-        flb_sds_cat(*out_buf, json_buf, flb_sds_len(json_buf));
-    } else {
-        /* Remove the closing bracket from the previous JSON array */
-        flb_sds_len_set(*out_buf, flb_sds_len(*out_buf) - 1);
-
-        /* Add a comma to separate the arrays */
-        flb_sds_cat(*out_buf, ",", 1);
-
-        /* Append the new JSON array without the opening bracket */
-        flb_sds_cat(*out_buf, json_buf + 1, flb_sds_len(json_buf) - 1);
-    }
-
-    flb_sds_destroy(json_buf);
-
-    return 0;
-}
-
 static int azure_kusto_format(struct flb_azure_kusto *ctx, const char *tag, int tag_len,
                               const void *data, size_t bytes, void **out_data,
                               size_t *out_size)
@@ -1033,130 +911,10 @@ static int azure_kusto_format(struct flb_azure_kusto *ctx, const char *tag, int 
     return 0;
 }
 
-static FILE *flb_sds_create_file(flb_sds_t file_path, const char *mode, int bufsize)
-{
-    FILE *fp;
-
-    fp = fopen(file_path, mode);
-    if (!fp) {
-        flb_errno();
-        return NULL;
-    }
-
-    if (bufsize > 0) {
-        setvbuf(fp, NULL, _IOFBF, bufsize);
-    }
-
-    return fp;
-}
-
 static int64_t get_current_time_milliseconds() {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     return (int64_t)ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
-}
-
-/*
- * Flushes the JSON data to a buffer file on disk
- */
-static void azure_kusto_flush_to_buffer(const void *data, size_t bytes, const char *tag,
-                                        int tag_len, struct flb_input_instance *i_ins,
-                                        struct flb_azure_kusto *ctx, struct flb_config *config)
-{
-    flb_sds_t json_data = (flb_sds_t)data;
-    int ret;
-
-    // Check if the buffer directory size exceeds the limit
-    struct stat st;
-    if (stat(ctx->buffer_dir, &st) == 0) {
-        if (st.st_size > FLB_AZURE_KUSTO_BUFFER_DIR_MAX_SIZE) {
-            flb_plg_warn(ctx->ins, "Buffer directory size exceeds the limit");
-        }
-    }
-
-    // Check if a buffer file exists and its size is within the limit
-    if (ctx->current_file && ctx->current_file_size < FLB_AZURE_KUSTO_BUFFER_MAX_FILE_SIZE) {
-        // Append JSON data to the current buffer file
-        ret = flb_sds_cat(ctx->current_file_path, json_data, flb_sds_len(json_data));
-        if (ret < 0) {
-            flb_plg_error(ctx->ins, "Failed to write JSON data to buffer file: %s", ctx->current_file_path);
-            return;
-        }
-        ctx->current_file_size += flb_sds_len(json_data);
-        fflush(ctx->current_file);
-
-        // Update the buffer file metadata
-        struct flb_azure_buffer_file_metadata *metadata = flb_calloc(1, sizeof(struct flb_azure_buffer_file_metadata));
-        if (metadata) {
-            metadata->file_path = flb_sds_create(ctx->current_file_path);
-            metadata->last_modified_time = time(NULL);
-            metadata->file_size = ctx->current_file_size;
-            metadata->event_tag = flb_sds_create_len(tag, tag_len);
-            metadata->tag_len = tag_len;
-
-            // Check if the current file size exceeds the maximum file size or if the last modified time exceeds the maximum file wait time
-            if (ctx->current_file_size >= FLB_AZURE_KUSTO_BUFFER_MAX_FILE_SIZE || (time(NULL) - metadata->last_modified_time) >= FLB_AZURE_KUSTO_BUFFER_MAX_FILE_WAIT_TIME) {
-                metadata->locked = 0;
-            } else {
-                metadata->locked = 1;
-            }
-
-            mk_list_add(&metadata->_head, &ctx->buffer_files);
-        }
-    } else {
-        // Close the current buffer file if it exists
-        if (ctx->current_file) {
-            fclose(ctx->current_file);
-            ctx->current_file = NULL;
-        }
-
-        // Create a new buffer file
-        ctx->current_file_path = flb_sds_create_size(256);
-        if (!ctx->current_file_path) {
-            flb_plg_error(ctx->ins, "Failed to allocate buffer file path");
-            return;
-        }
-        flb_sds_printf(&ctx->current_file_path, "%s/%s_%lld.buf", ctx->buffer_dir,
-                       "fluent-bit-kusto", get_current_time_milliseconds());
-
-        ctx->current_file = flb_sds_create_file(ctx->current_file_path, "wb", 0);
-        if (!ctx->current_file) {
-            flb_plg_error(ctx->ins, "Failed to open buffer file: %s", ctx->current_file_path);
-            flb_sds_destroy(ctx->current_file_path);
-            ctx->current_file_path = NULL;
-            return;
-        }
-
-        // Write JSON data to the new buffer file
-        ret = flb_sds_cat(ctx->current_file_path, json_data, flb_sds_len(json_data));
-        if (ret < 0) {
-            flb_plg_error(ctx->ins, "Failed to write JSON data to buffer file: %s", ctx->current_file_path);
-            flb_sds_destroy(ctx->current_file);
-            ctx->current_file = NULL;
-            flb_sds_destroy(ctx->current_file_path);
-            ctx->current_file_path = NULL;
-            return;
-        }
-        ctx->current_file_size = flb_sds_len(json_data);
-
-        // Create buffer file metadata
-        struct flb_azure_buffer_file_metadata *metadata = flb_calloc(1, sizeof(struct flb_azure_buffer_file_metadata));
-        if (metadata) {
-            metadata->file_path = flb_sds_create(ctx->current_file_path);
-            metadata->created_time = time(NULL);
-            metadata->last_modified_time = metadata->created_time;
-            metadata->file_size = ctx->current_file_size;
-            metadata->event_tag = flb_sds_create_len(tag, tag_len);
-            metadata->tag_len = tag_len;
-            // Check if the current file size exceeds the maximum file size or if the last modified time exceeds the maximum file wait time
-            if (ctx->current_file_size >= FLB_AZURE_KUSTO_BUFFER_MAX_FILE_SIZE || (time(NULL) - metadata->last_modified_time) >= FLB_AZURE_KUSTO_BUFFER_MAX_FILE_WAIT_TIME) {
-                metadata->locked = 0;
-            } else {
-                metadata->locked = 1;
-            }
-            mk_list_add(&metadata->_head, &ctx->buffer_files);
-        }
-    }
 }
 
 static int buffer_chunk(void *out_context, struct azure_kusto_file *upload_file,
@@ -1239,35 +997,6 @@ static void remove_brackets_sds(flb_sds_t *data) {
             return;
         }
     }
-}
-
-
-static flb_sds_t combine_json_arrays(flb_sds_t json1, flb_sds_t json2) {
-    if (!json1 || !json2) {
-        return NULL;
-    }
-
-    // Calculate the new size needed: original lengths minus two (for the '[]') plus one for new comma and new closing bracket
-    size_t new_size = flb_sds_len(json1) + flb_sds_len(json2) - 1;
-
-    // Allocate the new SDS to hold the combined JSON
-    flb_sds_t combined_json = flb_sds_create_size(new_size);
-    if (!combined_json) {
-        return NULL;
-    }
-
-    // Copy the first JSON array minus its closing bracket
-    flb_sds_cat(combined_json, json1, flb_sds_len(json1) - 1);
-
-    // Add a comma to separate the arrays if the second array is not empty
-    if (flb_sds_len(json2) > 2) { // greater than 2 to account for empty "[]"
-        flb_sds_cat(combined_json, ",", 1);
-    }
-
-    // Append the second JSON array minus its opening bracket
-    flb_sds_cat(combined_json, json2 + 1, flb_sds_len(json2) - 1);
-
-    return combined_json;
 }
 
 static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
@@ -1469,9 +1198,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             FLB_OUTPUT_RETURN(FLB_ERROR);
         }
 
-
-        /* Buffering mode is enabled, call azure_kusto_flush_to_buffer */
-        //azure_kusto_flush_to_buffer(json, json_size, event_chunk->tag, tag_len, i_ins, ctx, config);
         //flb_sds_destroy(json);
         FLB_OUTPUT_RETURN(FLB_OK);
     } else {
