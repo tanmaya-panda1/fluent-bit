@@ -234,83 +234,6 @@ flb_sds_t execute_ingest_csl_command(struct flb_azure_kusto *ctx, const char *cs
     return resp;
 }
 
-static flb_sds_t azure_kusto_format_file_name(struct flb_azure_kusto *ctx,
-                                              const char *tag, int tag_len)
-{
-    struct flb_time tm;
-    char time_str[64];
-    int len;
-    flb_sds_t file_name;
-
-    flb_time_get(&tm);
-    len = snprintf(time_str, sizeof(time_str) - 1,
-                   "%04d%02d%02d%02d%02d%02d",
-                   tm.tm.tv_sec / 86400, tm.tm.tv_sec / 3600 % 24,
-                   tm.tm.tv_sec / 60 % 60, tm.tm.tv_sec % 60,
-                   tm.tm.tv_nsec / 1000000, tm.tm.tv_nsec % 1000000);
-
-    file_name = flb_sds_create_size(tag_len + len + 5);
-    if (!file_name) {
-        flb_errno();
-        return NULL;
-    }
-
-    flb_sds_cat_safe(&file_name, tag, tag_len);
-    flb_sds_cat_safe(&file_name, "_", 1);
-    flb_sds_cat_safe(&file_name, time_str, len);
-    flb_sds_cat_safe(&file_name, ".log", 4);
-
-    return file_name;
-}
-
-static int azure_kusto_buffer_data(struct flb_azure_kusto *ctx,
-                                   const char *tag, int tag_len,
-                                   char *data, size_t bytes)
-{
-    int ret;
-    flb_sds_t file_name;
-    flb_sds_t file_path;
-    FILE *fp;
-
-    file_name = azure_kusto_format_file_name(ctx, tag, tag_len);
-    if (!file_name) {
-        flb_plg_error(ctx->ins, "failed to format file name");
-        return -1;
-    }
-
-    file_path = flb_sds_create_size(flb_sds_len(ctx->buffer_dir) + flb_sds_len(file_name) + 2);
-    if (!file_path) {
-        flb_errno();
-        flb_sds_destroy(file_name);
-        return -1;
-    }
-
-    flb_sds_cat_safe(&file_path, ctx->buffer_dir, flb_sds_len(ctx->buffer_dir));
-    flb_sds_cat_safe(&file_path, "/", 1);
-    flb_sds_cat_safe(&file_path, file_name, flb_sds_len(file_name));
-    flb_sds_destroy(file_name);
-
-    fp = fopen(file_path, "ab");
-    if (!fp) {
-        flb_errno();
-        flb_sds_destroy(file_path);
-        return -1;
-    }
-
-    ret = fwrite(data, 1, bytes, fp);
-    if (ret != bytes) {
-        flb_errno();
-        fclose(fp);
-        flb_sds_destroy(file_path);
-        return -1;
-    }
-
-    fclose(fp);
-    flb_sds_destroy(file_path);
-
-    return 0;
-}
-
 /*
  * return value is one of FLB_OK, FLB_RETRY, FLB_ERROR
  *
@@ -707,6 +630,7 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
         ctx->ins = ins;
         ctx->retry_time = 0;
         ctx->store_dir_limit_size = FLB_AZURE_KUSTO_BUFFER_DIR_MAX_SIZE;
+        ctx->has_old_buffers = azure_kusto_store_has_data(ctx);
 
         /* Initialize local storage */
         int ret = azure_kusto_store_init(ctx);
@@ -725,7 +649,7 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
             ctx->timer_ms = UPLOAD_TIMER_MIN_WAIT;
         }*/
 
-        ctx->timer_ms = 1800000;
+        ctx->timer_ms = 600000;
         flb_plg_debug(ins, "final timer_ms is  %d", ctx->timer_ms);
 
         /* validate 'total_file_size' */
@@ -738,7 +662,7 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
             return -1;
         }
         if (ctx->file_size > MAX_FILE_SIZE) {
-            flb_plg_error(ctx->ins, "Max total_file_size is %ld bytes", MAX_FILE_SIZE);
+            flb_plg_error(ctx->ins, "Max total_file_size must be lower than %ld bytes", MAX_FILE_SIZE);
             return -1;
         }
         flb_plg_info(ctx->ins, "Using upload size %lu bytes", ctx->file_size);
