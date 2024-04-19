@@ -415,7 +415,7 @@ static int construct_request_buffer(struct flb_azure_kusto *ctx, flb_sds_t new_d
 static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
 {
     struct flb_azure_kusto *ctx = data;
-    struct azure_kusto_file *chunk = NULL;
+    struct azure_kusto_file *file = NULL;
     struct flb_fstore_file *fsf;
     char *buffer = NULL;
     size_t buffer_size = 0;
@@ -433,34 +433,38 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
     /* Check all chunks and see if any have timed out */
     mk_list_foreach_safe(head, tmp, &ctx->stream_active->files) {
         fsf = mk_list_entry(head, struct flb_fstore_file, _head);
-        chunk = fsf->data;
-        flb_plg_debug(ctx->ins, "Iterating files inside upload timer callback (cb_azure_kusto_ingest).. %s", chunk->fsf->name);
-        if (now < (chunk->create_time + ctx->upload_timeout + ctx->retry_time)) {
+        file = fsf->data;
+        flb_plg_debug(ctx->ins, "Iterating files inside upload timer callback (cb_azure_kusto_ingest).. %s", file->fsf->name);
+        if (now < (file->create_time + ctx->upload_timeout + ctx->retry_time)) {
             continue; /* Only send chunks which have timed out */
         }
 
+        flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest :: Before file locked check %s", file->fsf->name);
         /* Locked chunks are being processed, skip */
-        if (chunk->locked == FLB_TRUE) {
+        if (file->locked == FLB_TRUE) {
             continue;
         }
 
-        ret = construct_request_buffer(ctx, NULL, chunk, &buffer, &buffer_size);
+        flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest :: Before construct_request_buffer %s", file->fsf->name);
+        ret = construct_request_buffer(ctx, NULL, file, &buffer, &buffer_size);
         if (ret < 0) {
             flb_plg_error(ctx->ins, "Could not construct request buffer for %s",
-                          chunk->file_path);
+                          file->fsf->name);
             continue;
         }
 
         payload = flb_sds_create(buffer);
         tag_sds = flb_sds_create(fsf->meta_buf);
 
-        flb_plg_debug(ctx->ins, "tag of the file %s", tag_sds);
+        flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest ::: tag of the file %s", tag_sds);
 
         ret = azure_kusto_load_ingestion_resources(ctx, config);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "cannot load ingestion resources");
             FLB_OUTPUT_RETURN(FLB_ERROR);
         }
+
+        flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest ::: before starting kusto queued ingestion %s", file->fsf->name);
 
         ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), payload, flb_sds_len(payload));
         if (ret != 0) {
@@ -480,7 +484,7 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
                           (char *) fsf->meta_buf);
         }
     }
-
+    flb_plg_debug(ctx->ins, "Exited upload timer callback (cb_azure_kusto_ingest)..");
 }
 
 void add_brackets_sds(flb_sds_t *data) {
