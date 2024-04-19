@@ -434,7 +434,7 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
     mk_list_foreach_safe(head, tmp, &ctx->stream_active->files) {
         fsf = mk_list_entry(head, struct flb_fstore_file, _head);
         chunk = fsf->data;
-
+        flb_plg_debug(ctx->ins, "Iterating files inside upload timer callback (cb_azure_kusto_ingest).. %s", chunk->fsf->name);
         if (now < (chunk->create_time + ctx->upload_timeout + ctx->retry_time)) {
             continue; /* Only send chunks which have timed out */
         }
@@ -453,6 +453,8 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
 
         payload = flb_sds_create(buffer);
         tag_sds = flb_sds_create(fsf->meta_buf);
+
+        flb_plg_debug(ctx->ins, "tag of the file %s", tag_sds);
 
         ret = azure_kusto_load_ingestion_resources(ctx, config);
         if (ret != 0) {
@@ -1034,16 +1036,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             flb_plg_info(ctx->ins, "total_file_size exceeded %s",
                          event_chunk->tag);
             total_file_size_check = FLB_TRUE;
-        }
-
-        if (ret == 0) {
-            flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
-            //flb_sds_destroy(json);
-            //FLB_OUTPUT_RETURN(FLB_OK);
-        } else {
-            flb_plg_error(ctx->ins, "failed to buffer chunk %s", event_chunk->tag);
-            //flb_sds_destroy(json);
-            FLB_OUTPUT_RETURN(FLB_ERROR);
         }
 
         flb_plg_debug(ctx->ins, "before removing data size %zu", flb_sds_len(json));
