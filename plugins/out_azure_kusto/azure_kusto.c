@@ -476,9 +476,9 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
             flb_fstore_file_delete(ctx->fs, fsf);
         }
 
-        flb_free(buffer);
-        flb_sds_destroy(payload);
-        flb_sds_destroy(tag_sds);
+        //flb_free(buffer);
+        //flb_sds_destroy(payload);
+        //flb_sds_destroy(tag_sds);
         if (ret != FLB_OK) {
             flb_plg_error(ctx->ins, "Could not send chunk with tag %s",
                           (char *) fsf->meta_buf);
@@ -655,7 +655,7 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
             ctx->timer_ms = UPLOAD_TIMER_MIN_WAIT;
         }*/
 
-        ctx->timer_ms = 600000;
+        ctx->timer_ms = 60000; // 1 min
         flb_plg_debug(ins, "final timer_ms is  %d", ctx->timer_ms);
 
         /* validate 'total_file_size' */
