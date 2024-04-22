@@ -1083,7 +1083,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             ret = ingest_to_kusto_ext(ctx, json, upload_file,
                                       event_chunk->tag,
                                       flb_sds_len(event_chunk->tag));
-            if (ret == 0){
+            /*if (ret == 0){
                 flb_plg_debug(ctx->ins, "successfully ingested and deleted file %s with size %zu", upload_file->fsf->name, upload_file->size);
                 ret = azure_kusto_store_file_delete(ctx, upload_file);
                 if (ret != 0){
@@ -1094,7 +1094,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             }else{
                 flb_plg_error(ctx->ins, "unable to ingest file ");
                 FLB_OUTPUT_RETURN(FLB_ERROR);
-            }
+            }*/
             flb_plg_info(ctx->ins, "this chunk of size is lost %zu",
                          json_size);
             FLB_OUTPUT_RETURN(FLB_OK);
