@@ -151,6 +151,11 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
     gmtime_r(&now, &tm);
     len = strftime(tmp, sizeof(tmp) - 1, "%a, %d %b %Y %H:%M:%S GMT", &tm);
 
+    if (pthread_mutex_lock(&ctx->blob_mutex)) {
+        flb_plg_error(ctx->ins, "error unlocking mutex");
+        return -1;
+    }
+
     u_node = flb_upstream_ha_node_get(ctx->resources->blob_ha);
     if (!u_node) {
         flb_plg_error(ctx->ins, "error getting blob upstream");
@@ -161,7 +166,16 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
     flb_plg_debug(ctx->ins,"inside blob after upstream ha node get");
     u_node->u->base.net.connect_timeout = ctx->ingestion_endpoint_connect_timeout;
     flb_plg_debug(ctx->ins,"inside blob after upstream ha node get  :: setting ingestion timeout");
+    if (!u_node->u) {
+        flb_plg_error(ctx->ins, "upstream data is null");
+        return -1;
+    }
     u_conn = flb_upstream_conn_get(u_node->u);
+
+    if (pthread_mutex_unlock(&ctx->blob_mutex)) {
+        flb_plg_error(ctx->ins, "error unlocking mutex");
+        return -1;
+    }
     flb_plg_debug(ctx->ins,"inside blob after upstream ha node get :: after getting connection");
     if (u_conn) {
         if (pthread_mutex_lock(&ctx->blob_mutex)) {
@@ -542,6 +556,8 @@ int azure_kusto_queued_ingestion(struct flb_azure_kusto *ctx, flb_sds_t tag,
         flb_plg_error(ctx->ins, "error unlocking mutex");
     	return NULL;
     }
+
+    flb_plg_debug(ctx->ins, "blob uri created is %s", blob_uri);
 
     if (blob_id) {
         blob_uri = azure_kusto_create_blob(ctx, blob_id, payload, payload_size);
