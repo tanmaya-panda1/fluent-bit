@@ -476,9 +476,9 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
             flb_fstore_file_delete(ctx->fs, fsf);
         }
 
-        flb_free(buffer);
-        flb_sds_destroy(payload);
-        flb_sds_destroy(tag_sds);
+        //flb_free(buffer);
+        //flb_sds_destroy(payload);
+        //flb_sds_destroy(tag_sds);
         if (ret != FLB_OK) {
             flb_plg_error(ctx->ins, "Could not send chunk with tag %s",
                           (char *) fsf->meta_buf);
@@ -968,6 +968,8 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
     if (ctx->buffering_enabled == FLB_TRUE) {
 
+        //flush_init(ctx);
+
         cb_azure_kusto_ingest(config, ctx);
 
         ret = azure_kusto_load_ingestion_resources(ctx, config);
@@ -975,8 +977,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             flb_plg_error(ctx->ins, "cannot load ingestion resources");
             FLB_OUTPUT_RETURN(FLB_ERROR);
         }
-
-
 
         flb_plg_debug(ctx->ins,"event tag is  ::: %s", event_chunk->tag);
 
@@ -1082,7 +1082,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             }
 
             /* Send upload directly without upload queue */
-            ret = ingest_to_kusto_ext(ctx, json, upload_file,
+            /*ret = ingest_to_kusto_ext(ctx, json, upload_file,
                                       event_chunk->tag,
                                       flb_sds_len(event_chunk->tag));
             if (ret == 0){
@@ -1096,7 +1096,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             }else{
                 flb_plg_error(ctx->ins, "unable to ingest file ");
                 FLB_OUTPUT_RETURN(FLB_ERROR);
-            }
+            }*/
             flb_plg_info(ctx->ins, "this chunk of size is lost %zu",
                          json_size);
             FLB_OUTPUT_RETURN(FLB_OK);
