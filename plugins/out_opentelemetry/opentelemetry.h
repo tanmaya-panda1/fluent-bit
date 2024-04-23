@@ -59,6 +59,47 @@ struct opentelemetry_context {
     char *host;
     int port;
 
+    /* metadata keys */
+    flb_sds_t logs_observed_timestamp_metadata_key;
+    struct flb_record_accessor *ra_observed_timestamp_metadata;
+
+    flb_sds_t logs_timestamp_metadata_key;
+    struct flb_record_accessor *ra_timestamp_metadata;
+
+    flb_sds_t logs_severity_text_metadata_key;
+    struct flb_record_accessor *ra_severity_text_metadata;
+
+    flb_sds_t logs_severity_number_metadata_key;
+    struct flb_record_accessor *ra_severity_number_metadata;
+
+    flb_sds_t logs_trace_flags_metadata_key;
+    struct flb_record_accessor *ra_trace_flags_metadata;
+
+    flb_sds_t logs_span_id_metadata_key;
+    struct flb_record_accessor *ra_span_id_metadata;
+
+    flb_sds_t logs_trace_id_metadata_key;
+    struct flb_record_accessor *ra_trace_id_metadata;
+
+    flb_sds_t logs_attributes_metadata_key;
+    struct flb_record_accessor *ra_attributes_metadata;
+
+    flb_sds_t logs_instrumentation_scope_metadata_key;
+    flb_sds_t logs_resource_metadata_key;
+
+    /* otel body keys */
+    flb_sds_t logs_span_id_message_key;
+    struct flb_record_accessor *ra_span_id_message;
+
+    flb_sds_t logs_trace_id_message_key;
+    struct flb_record_accessor *ra_trace_id_message;
+
+    flb_sds_t logs_severity_text_message_key;
+    struct flb_record_accessor *ra_severity_text_message;
+
+    flb_sds_t logs_severity_number_message_key;
+    struct flb_record_accessor *ra_severity_number_message;
+
     /* Number of logs to flush at a time */
     int batch_size;
 

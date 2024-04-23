@@ -24,6 +24,7 @@
 #include <fluent-bit/flb_kv.h>
 #include <fluent-bit/flb_pack.h>
 #include <fluent-bit/flb_log_event_decoder.h>
+#include <fluent-bit/flb_ra_key.h>
 
 #include <cfl/cfl.h>
 #include <fluent-otel-proto/fluent-otel.h>
@@ -354,6 +355,15 @@ static void clear_array(Opentelemetry__Proto__Logs__V1__LogRecord **logs,
                                  logs[index]->n_attributes);
 
             logs[index]->attributes = NULL;
+        }
+        if (logs[index]->severity_text != NULL) {
+            flb_free(logs[index]->severity_text);
+        }
+        if (logs[index]->span_id.data != NULL) {
+            flb_free(logs[index]->span_id.data);
+        }
+        if (logs[index]->trace_id.data != NULL) {
+            flb_free(logs[index]->trace_id.data);
         }
     }
 }
@@ -934,6 +944,248 @@ static int flush_to_otel(struct opentelemetry_context *ctx,
     return ret;
 }
 
+/* https://opentelemetry.io/docs/specs/otel/logs/data-model/#field-severitynumber */
+static int is_valid_severity_text(const char *str, size_t str_len)
+{
+    if (str_len == 5) {
+        if (strncmp("TRACE", str, 5) == 0 ||
+            strncmp("DEBUG", str, 5) == 0 ||
+            strncmp("ERROR", str, 5) == 0 ||
+            strncmp("FATAL", str, 5) == 0) {
+            return FLB_TRUE;
+        }
+    }
+    else if (str_len == 4) {
+        if (strncmp("INFO", str, 4) == 0||
+            strncmp("WARN", str, 4) == 0) {
+            return FLB_TRUE;
+        }
+    }
+    return FLB_FALSE;
+}
+/* https://opentelemetry.io/docs/specs/otel/logs/data-model/#field-severitynumber */
+static int is_valid_severity_number(uint64_t val)
+{
+    if (val >= 1 && val <= 24) {
+        return FLB_TRUE;
+    }
+    return FLB_FALSE;
+}
+
+static int append_v1_logs_metadata(struct opentelemetry_context *ctx,
+                                   struct flb_log_event *event,
+                                   Opentelemetry__Proto__Logs__V1__LogRecord  *log_record)
+{
+    struct flb_ra_value *ra_val;
+
+    if (ctx == NULL || event == NULL || log_record == NULL) {
+        return -1;
+    }
+    /* ObservedTimestamp */
+    if (ctx->ra_observed_timestamp_metadata) {
+        ra_val = flb_ra_get_value_object(ctx->ra_observed_timestamp_metadata, *event->metadata);
+        if (ra_val != NULL && ra_val->o.type == MSGPACK_OBJECT_POSITIVE_INTEGER) {
+            log_record->observed_time_unix_nano = ra_val->o.via.u64;
+            flb_ra_key_value_destroy(ra_val);
+        }
+    }
+
+    /* Timestamp */
+    if (ctx->ra_timestamp_metadata) {
+        ra_val = flb_ra_get_value_object(ctx->ra_timestamp_metadata, *event->metadata);
+        if (ra_val != NULL && ra_val->o.type == MSGPACK_OBJECT_POSITIVE_INTEGER) {
+            log_record->time_unix_nano = ra_val->o.via.u64;
+            flb_ra_key_value_destroy(ra_val);
+        }
+        else {
+            log_record->time_unix_nano = flb_time_to_nanosec(&event->timestamp);
+        }
+    }
+
+    /* SeverityText */
+    if (ctx->ra_severity_text_metadata) {
+        ra_val = flb_ra_get_value_object(ctx->ra_severity_text_metadata, *event->metadata);
+        if (ra_val != NULL && ra_val->o.type == MSGPACK_OBJECT_STR &&
+            is_valid_severity_text(ra_val->o.via.str.ptr, ra_val->o.via.str.size) == FLB_TRUE) {
+            log_record->severity_text = flb_calloc(1, ra_val->o.via.str.size+1);
+            if (log_record->severity_text) {
+                strncpy(log_record->severity_text, ra_val->o.via.str.ptr, ra_val->o.via.str.size);
+            }
+            flb_ra_key_value_destroy(ra_val);
+        }
+        else {
+            /* To prevent invalid free */
+            log_record->severity_text = NULL;
+        }
+    }
+
+    /* SeverityNumber */
+    if (ctx->ra_severity_number_metadata) {
+        ra_val = flb_ra_get_value_object(ctx->ra_severity_number_metadata, *event->metadata);
+        if (ra_val != NULL && ra_val->o.type == MSGPACK_OBJECT_POSITIVE_INTEGER &&
+            is_valid_severity_number(ra_val->o.via.u64) == FLB_TRUE) {
+            log_record->severity_number = ra_val->o.via.u64;
+            flb_ra_key_value_destroy(ra_val);
+        }
+    }
+
+    /* TraceFlags */
+    if (ctx->ra_trace_flags_metadata) {
+        ra_val = flb_ra_get_value_object(ctx->ra_trace_flags_metadata, *event->metadata);
+        if (ra_val != NULL && ra_val->o.type == MSGPACK_OBJECT_POSITIVE_INTEGER) {
+            log_record->flags = (uint32_t)ra_val->o.via.u64;
+            flb_ra_key_value_destroy(ra_val);
+        }
+    }
+
+    /* SpanId */
+    if (ctx->ra_span_id_metadata) {
+        ra_val = flb_ra_get_value_object(ctx->ra_span_id_metadata, *event->metadata);
+        if (ra_val != NULL && ra_val->o.type == MSGPACK_OBJECT_BIN) {
+            log_record->span_id.data = flb_calloc(1, ra_val->o.via.bin.size);
+            if (log_record->span_id.data) {
+                memcpy(log_record->span_id.data, ra_val->o.via.bin.ptr, ra_val->o.via.bin.size);
+                log_record->span_id.len = ra_val->o.via.bin.size;
+            }
+            flb_ra_key_value_destroy(ra_val);
+        }
+    }
+
+    /* TraceId */
+    if (ctx->ra_trace_id_metadata) {
+        ra_val = flb_ra_get_value_object(ctx->ra_trace_id_metadata, *event->metadata);
+        if (ra_val != NULL && ra_val->o.type == MSGPACK_OBJECT_BIN) {
+            log_record->trace_id.data = flb_calloc(1, ra_val->o.via.bin.size);
+            if (log_record->trace_id.data) {
+                memcpy(log_record->trace_id.data, ra_val->o.via.bin.ptr, ra_val->o.via.bin.size);
+                log_record->trace_id.len = ra_val->o.via.bin.size;
+            }
+            flb_ra_key_value_destroy(ra_val);
+        }
+    }
+
+    /* Attributes */
+    if (ctx->ra_attributes_metadata) {
+        ra_val = flb_ra_get_value_object(ctx->ra_attributes_metadata, *event->metadata);
+        if (ra_val != NULL && ra_val->o.type == MSGPACK_OBJECT_MAP) {
+            if (log_record->attributes != NULL) {
+                otlp_kvarray_destroy(log_record->attributes,
+                                     log_record->n_attributes);
+            }
+            log_record->attributes = msgpack_map_to_otlp_kvarray(&ra_val->o, &log_record->n_attributes);
+            flb_ra_key_value_destroy(ra_val);
+        }
+    }
+
+    return 0;
+}
+
+static int append_v1_logs_message(struct opentelemetry_context *ctx,
+                                   struct flb_log_event *event,
+                                   Opentelemetry__Proto__Logs__V1__LogRecord  *log_record)
+{
+    struct flb_ra_value *ra_val;
+
+    if (ctx == NULL || event == NULL || log_record == NULL) {
+        return -1;
+    }
+
+        /* SeverityText */
+    if (ctx->ra_severity_text_message) {
+        ra_val = flb_ra_get_value_object(ctx->ra_severity_text_message, *event->body);
+        if (ra_val != NULL && ra_val->o.type == MSGPACK_OBJECT_STR) {
+            if(is_valid_severity_text(ra_val->o.via.str.ptr, ra_val->o.via.str.size) == FLB_TRUE){
+                log_record->severity_text = flb_calloc(1, ra_val->o.via.str.size+1);
+                if (log_record->severity_text) {
+                    strncpy(log_record->severity_text, ra_val->o.via.str.ptr, ra_val->o.via.str.size);
+                }
+                flb_ra_key_value_destroy(ra_val);
+            }else{
+                flb_plg_warn(ctx->ins, "Unable to process %s. Invalid Severity Text.\n", ctx->ra_severity_text_message->pattern);
+                log_record->severity_text = NULL;
+            }
+        }
+        else {
+            /* To prevent invalid free */
+            log_record->severity_text = NULL;
+        }
+    }
+
+    /* SeverityNumber */
+    if (ctx->ra_severity_number_message) {
+        ra_val = flb_ra_get_value_object(ctx->ra_severity_number_metadata, *event->body);
+        if (ra_val != NULL && ra_val->o.type == MSGPACK_OBJECT_POSITIVE_INTEGER &&
+            is_valid_severity_number(ra_val->o.via.u64) == FLB_TRUE) {
+            log_record->severity_number = ra_val->o.via.u64;
+            flb_ra_key_value_destroy(ra_val);
+        }
+    }else if(ctx->ra_severity_text_message){
+        //TODO get sev number based off sev text
+    }
+
+    /* SpanId */
+    if (ctx->ra_span_id_message) {
+        ra_val = flb_ra_get_value_object(ctx->ra_span_id_message, *event->body);
+        if (ra_val != NULL) {
+            if(ra_val->o.type == MSGPACK_OBJECT_BIN){
+                log_record->span_id.data = flb_calloc(1, ra_val->o.via.bin.size);
+                if (log_record->span_id.data) {
+                    memcpy(log_record->span_id.data, ra_val->o.via.bin.ptr, ra_val->o.via.bin.size);
+                    log_record->span_id.len = ra_val->o.via.bin.size;
+                }
+            }else if(ra_val->o.type == MSGPACK_OBJECT_STR){
+                log_record->span_id.data = flb_calloc(8, sizeof(uint8_t));
+                if (log_record->span_id.data) {
+                    // Convert to a byte array
+                    uint8_t val[8];
+                    size_t count;
+                    for(count = 0; count < sizeof val/sizeof *val; count++ ){
+                        sscanf(ra_val->o.via.str.ptr, "%2hhx", &val[count]);
+                        ra_val->o.via.str.ptr+=2;
+                    }
+                    memcpy(log_record->span_id.data, val, sizeof(val));
+                    log_record->span_id.len = sizeof(val);
+                }
+            }else{
+                flb_plg_warn(ctx->ins, "Unable to process %s. Unsupported data type.\n", ctx->ra_span_id_message->pattern);
+            }
+            flb_ra_key_value_destroy(ra_val);
+        }
+    }
+
+    /* TraceId */
+    if (ctx->ra_trace_id_message) {
+        ra_val = flb_ra_get_value_object(ctx->ra_trace_id_message, *event->body);
+        if (ra_val != NULL) {
+            if(ra_val->o.type == MSGPACK_OBJECT_BIN){
+                log_record->trace_id.data = flb_calloc(1, ra_val->o.via.bin.size);
+                if (log_record->trace_id.data) {
+                    memcpy(log_record->trace_id.data, ra_val->o.via.bin.ptr, ra_val->o.via.bin.size);
+                    log_record->trace_id.len = ra_val->o.via.bin.size;
+                }
+            }else if(ra_val->o.type == MSGPACK_OBJECT_STR){
+                log_record->trace_id.data = flb_calloc(16, sizeof(uint8_t));
+                if (log_record->trace_id.data) {
+                    // Convert from hexdec string to a 16 byte array
+                    uint8_t val[16];
+                    size_t count;
+                    for(count = 0; count < sizeof val/sizeof *val; count++ ){
+                        sscanf(ra_val->o.via.str.ptr, "%2hhx", &val[count]);
+                        ra_val->o.via.str.ptr+=2;
+                    }
+                    memcpy(log_record->trace_id.data, val, sizeof(val));
+                    log_record->trace_id.len = sizeof(val);
+                }
+            }else{
+                flb_plg_warn(ctx->ins, "Unable to process %s. Unsupported data type.\n", ctx->ra_trace_id_message->pattern);
+            }
+            flb_ra_key_value_destroy(ra_val);
+        }
+    }
+
+    return 0;
+}
+
 static int process_logs(struct flb_event_chunk *event_chunk,
                         struct flb_output_flush *out_flush,
                         struct flb_input_instance *ins, void *out_context,
@@ -1010,9 +1262,12 @@ static int process_logs(struct flb_event_chunk *event_chunk,
             break;
         }
 
+        append_v1_logs_metadata(ctx, &event, &log_records[log_record_count]);
+
+        append_v1_logs_message(ctx, &event, &log_records[log_record_count]);
+
         ret = FLB_OK;
 
-        /* set timestamp */
         log_records[log_record_count].time_unix_nano = flb_time_to_nanosec(&event.timestamp);
         log_record_count++;
 
@@ -1314,7 +1569,6 @@ static struct flb_config_map config_map[] = {
      0, FLB_FALSE, 0,
      "Set payload compression mechanism. Option available is 'gzip'"
     },
-
     /*
      * Logs Properties
      * ---------------
@@ -1348,6 +1602,77 @@ static struct flb_config_map config_map[] = {
      0, FLB_TRUE, offsetof(struct opentelemetry_context, log_response_payload),
      "Specify if the response paylod should be logged or not"
     },
+    {
+     FLB_CONFIG_MAP_STR, "logs_observed_timestamp_metadata_key", "$ObservedTimestamp",
+     0, FLB_TRUE, offsetof(struct opentelemetry_context, logs_observed_timestamp_metadata_key),
+     "Specify an ObservedTimestamp key"
+    },
+    {
+     FLB_CONFIG_MAP_STR, "logs_timestamp_metadata_key", "$Timestamp",
+     0, FLB_TRUE, offsetof(struct opentelemetry_context, logs_timestamp_metadata_key),
+     "Specify a Timestamp key"
+    },
+    {
+     FLB_CONFIG_MAP_STR, "logs_severity_text_metadata_key", "$SeverityText",
+     0, FLB_TRUE, offsetof(struct opentelemetry_context, logs_severity_text_metadata_key),
+     "Specify a SeverityText key"
+    },
+    {
+     FLB_CONFIG_MAP_STR, "logs_severity_number_metadata_key", "$SeverityNumber",
+     0, FLB_TRUE, offsetof(struct opentelemetry_context, logs_severity_number_metadata_key),
+     "Specify a SeverityNumber key"
+    },
+    {
+     FLB_CONFIG_MAP_STR, "logs_trace_flags_metadata_key", "$TraceFlags",
+     0, FLB_TRUE, offsetof(struct opentelemetry_context, logs_trace_flags_metadata_key),
+     "Specify a TraceFlags key"
+    },
+    {
+     FLB_CONFIG_MAP_STR, "logs_span_id_metadata_key", "$SpanId",
+     0, FLB_TRUE, offsetof(struct opentelemetry_context, logs_span_id_metadata_key),
+     "Specify a SpanId key"
+    },
+    {
+     FLB_CONFIG_MAP_STR, "logs_trace_id_metadata_key", "$TraceId",
+     0, FLB_TRUE, offsetof(struct opentelemetry_context, logs_trace_id_metadata_key),
+     "Specify a TraceId key"
+    },
+    {
+     FLB_CONFIG_MAP_STR, "logs_attributes_metadata_key", "$Attributes",
+     0, FLB_TRUE, offsetof(struct opentelemetry_context, logs_attributes_metadata_key),
+     "Specify an Attributes key"
+    },
+    {
+     FLB_CONFIG_MAP_STR, "logs_instrumentation_scope_metadata_key", "InstrumentationScope",
+     0, FLB_TRUE, offsetof(struct opentelemetry_context, logs_instrumentation_scope_metadata_key),
+     "Specify an InstrumentationScope key"
+    },
+    {
+     FLB_CONFIG_MAP_STR, "logs_resource_metadata_key", "Resource",
+     0, FLB_TRUE, offsetof(struct opentelemetry_context, logs_resource_metadata_key),
+     "Specify a Resource key"
+    },
+        {
+     FLB_CONFIG_MAP_STR, "logs_span_id_message_key", "$SpanId",
+     0, FLB_TRUE, offsetof(struct opentelemetry_context, logs_span_id_message_key),
+     "Specify a SpanId key"
+    },
+    {
+     FLB_CONFIG_MAP_STR, "logs_trace_id_message_key", "$TraceId",
+     0, FLB_TRUE, offsetof(struct opentelemetry_context, logs_trace_id_message_key),
+     "Specify a TraceId key"
+    },
+    {
+     FLB_CONFIG_MAP_STR, "logs_severity_text_message_key", "$SeverityText",
+     0, FLB_TRUE, offsetof(struct opentelemetry_context, logs_severity_text_message_key),
+     "Specify a Severity Text key"
+    },
+    {
+     FLB_CONFIG_MAP_STR, "logs_severity_number_message_key", "$SeverityNumber",
+     0, FLB_TRUE, offsetof(struct opentelemetry_context, logs_severity_number_message_key),
+     "Specify a Severity Number key"
+    },
+
     /* EOF */
     {0}
 };
