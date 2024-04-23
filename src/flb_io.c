@@ -111,6 +111,8 @@ int flb_io_net_connect(struct flb_connection *connection,
     flb_sockfd_t fd = -1;
     // struct flb_upstream *u = u_conn->u;
 
+    flb_trace("[io] inside flb_io_net_connect");
+
     if (connection->fd > 0) {
         flb_socket_close(connection->fd);
 
@@ -126,6 +128,8 @@ int flb_io_net_connect(struct flb_connection *connection,
         async = FLB_FALSE;
     }
 
+    flb_trace("[io] before performing flb_net_tcp_connect");
+
     /* Perform TCP connection */
     fd = flb_net_tcp_connect(connection->upstream->tcp_host,
                              connection->upstream->tcp_port,
@@ -136,8 +140,12 @@ int flb_io_net_connect(struct flb_connection *connection,
         return -1;
     }
 
+    flb_trace("[io] after performing flb_net_tcp_connect");
+
     if (connection->upstream->proxied_host) {
         ret = flb_http_client_proxy_connect(connection);
+
+        flb_trace("[io] inside connection->upstream->proxied_host");
 
         if (ret == -1) {
             flb_debug("[http_client] flb_http_client_proxy_connect connection #%i failed to %s:%i.",
@@ -159,6 +167,7 @@ int flb_io_net_connect(struct flb_connection *connection,
     /* Check if TLS was enabled, if so perform the handshake */
     if (flb_stream_is_secure(connection->stream) &&
         connection->stream->tls_context != NULL) {
+        flb_trace("[io] inside connection->check if flb_stream_is_secure");
         ret = flb_tls_session_create(connection->stream->tls_context,
                                      connection,
                                      coro);

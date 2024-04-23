@@ -587,6 +587,10 @@ static struct flb_connection *create_conn(struct flb_upstream *u)
 
     flb_debug("[upstream] before flb_io_net_connect connection for %s:%i", u->tcp_host, u->tcp_port);
 
+    if (!coro){
+        flb_debug("[upstream] coro is null while connecting to %s:%i", u->tcp_host, u->tcp_port);
+    }
+
     /* Start connection */
     ret = flb_io_net_connect(conn, coro);
     if (ret == -1) {
