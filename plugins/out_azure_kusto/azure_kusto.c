@@ -865,7 +865,6 @@ static int buffer_chunk(void *out_context, struct azure_kusto_file *upload_file,
 
     ret = azure_kusto_store_buffer_put(ctx, upload_file, tag,
                               tag_len, chunk, (size_t) chunk_size, file_first_log_time);
-    flb_sds_destroy(chunk);
     if (ret < 0) {
         flb_plg_warn(ctx->ins, "Could not buffer chunk. ");
         return -1;
@@ -1116,11 +1115,11 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         if (ret == 0) {
             flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
-           // flb_sds_destroy(json);
+            flb_sds_destroy(json);
             FLB_OUTPUT_RETURN(FLB_OK);
         } else {
             flb_plg_error(ctx->ins, "failed to buffer chunk %s", event_chunk->tag);
-           // flb_sds_destroy(json);
+            flb_sds_destroy(json);
             FLB_OUTPUT_RETURN(FLB_ERROR);
         }
 
