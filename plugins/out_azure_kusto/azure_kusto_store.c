@@ -82,12 +82,6 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
             flb_fstore_file_delete(ctx->fs, fsf);
         }
 
-        /*if (fsf->meta_size != tag_len) {
-            flb_plg_debug(ctx->ins, "File '%s' meta size (%zu) does not match tag length (%d)", fsf->name, fsf->meta_size, tag_len);
-            fsf = NULL;
-            continue;
-        }*/
-
         /* skip locked chunks */
         azure_kusto_file = fsf->data;
         if (azure_kusto_file->locked == FLB_TRUE) {
@@ -103,8 +97,6 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
             break;
         }
 
-        //flb_plg_debug(ctx->ins, "File '%s' meta buffer does not match tag '%.*s'", fsf->name, tag_len, tag);
-
         /* not found, invalidate the reference */
         fsf = NULL;
     }
@@ -116,17 +108,6 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
     return fsf->data;
 }
 
-/*void flb_fstore_file_close(struct flb_fstore_file *fsf)
-{
-    if (fsf) {
-        if (fsf->fd > 0) {
-            close(fsf->fd);
-            fsf->fd = -1;
-        }
-        flb_free(fsf->name);
-        flb_free(fsf);
-    }
-}*/
 
 int flb_fstore_file_exists(struct flb_fstore *fs, flb_sds_t name)
 {
@@ -164,7 +145,6 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
     /* If no target file was found, create a new one */
     if (!azure_kusto_file || azure_kusto_file == NULL) {
         flb_plg_error(ctx->ins, "inside azure_kusto_store_buffer_put function :: inside azure_kusto_file == NULL");
-        //name = gen_store_filename(tag);
         name = flb_sds_create_len(tag, tag_len);
         if (!name) {
             flb_plg_error(ctx->ins, "could not generate chunk file name");
@@ -181,7 +161,6 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
             flb_sds_destroy(name);
             return -1;
         }
-        //flb_sds_destroy(name);
 
         /* Write tag as metadata */
         ret = flb_fstore_file_meta_set(ctx->fs, fsf, (char *) tag, tag_len);

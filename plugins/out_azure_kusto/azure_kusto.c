@@ -476,9 +476,9 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
             flb_fstore_file_delete(ctx->fs, fsf);
         }
 
-        //flb_free(buffer);
-        //flb_sds_destroy(payload);
-        //flb_sds_destroy(tag_sds);
+        flb_free(buffer);
+        flb_sds_destroy(payload);
+        flb_sds_destroy(tag_sds);
         if (ret != FLB_OK) {
             flb_plg_error(ctx->ins, "Could not send chunk with tag %s",
                           (char *) fsf->meta_buf);
@@ -526,8 +526,6 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
     struct flb_azure_kusto *ctx = out_context;
     flb_sds_t payload;
     flb_sds_t tag_sds = flb_sds_create_len(tag, tag_len);
-
-    flb_plg_trace(ctx->ins, "inside ingest_to_kusto_ext ");
 
     /* Create buffer to upload to S3 */
     ret = construct_request_buffer(ctx, new_data, upload_file, &buffer, &buffer_size);
@@ -965,7 +963,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
     /* Reformat msgpack to JSON payload */
     ret = azure_kusto_format(ctx, event_chunk->tag, tag_len, event_chunk->data,
                              event_chunk->size, (void **)&json, &json_size);
-    flb_plg_trace(ctx->ins, "after kusto format json_size is  %zu", json_size);
     if (ret != 0) {
         flb_plg_error(ctx->ins, "cannot reformat data into json");
         FLB_OUTPUT_RETURN(FLB_RETRY);
@@ -987,7 +984,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         upload_file = azure_kusto_store_file_get(ctx,
                                         event_chunk->tag,
                                         event_chunk->size);
-        //flb_plg_debug(ctx->ins,"upload_file retrieved is  ::: %s", upload_file->);
 
         if (upload_file == NULL) {
             flb_plg_debug(ctx->ins, "upload_file is NULL or size exceeded, creating new file");
@@ -1036,24 +1032,18 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         if (upload_file != NULL && time(NULL) >
                                    (upload_file->create_time + ctx->upload_timeout)) {
             upload_timeout_check = FLB_TRUE;
-            flb_plg_info(ctx->ins, "upload_timeout reached for %s",
+            flb_plg_debug(ctx->ins, "upload_timeout reached for %s",
                          event_chunk->tag);
         }
 
         /* If total_file_size has been reached, upload file */
         if (upload_file && upload_file->size + json_size > ctx->file_size) {
-            flb_plg_info(ctx->ins, "total_file_size exceeded %s",
+            flb_plg_debug(ctx->ins, "total_file_size exceeded %s",
                          event_chunk->tag);
             total_file_size_check = FLB_TRUE;
         }
 
-        flb_plg_debug(ctx->ins, "before removing data size %zu", flb_sds_len(json));
-
-        //remove_brackets_sds(&json);
-
-
         if (json_size >= 2 && json[0] == '[' && json[json_size - 1] == ']') {
-            flb_plg_debug(ctx->ins, "[azure_kusto] before removing [] %zu",json_size);
             // Reduce 'bytes' by 1 to remove the ']' at the end
             json_size--;
 
@@ -1064,19 +1054,13 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             // Set the new length of the data string
             flb_sds_len_set(json, json_size);
 
-            flb_plg_debug(ctx->ins, "[azure_kusto] after removing [] %zu", json_size);
-
-            flb_plg_debug(ctx->ins, "[azure_kusto] after removing [] %zu",json_size);
             // Add a comma to the end
             json = flb_sds_cat(json, ",", 1);
             json_size = flb_sds_len(json);
         }
 
-        flb_plg_debug(ctx->ins, "after removing brackets buffered chunk %zu", flb_sds_len(json));
-
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
         if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
-            flb_plg_trace(ctx->ins, "before loading ingestion resources xxxx with chunk size %zu", json_size);
             /* Load or refresh ingestion resources */
             ret = azure_kusto_load_ingestion_resources(ctx, config);
             if (ret != 0) {
@@ -1106,9 +1090,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             }
         }
 
-        /*flb_plg_info(ctx->ins, "before sending to buffer chunk %s",
-                     event_chunk->tag); */
-
         // Buffer current chunk in filesystem and wait for next chunk from engine
         ret = buffer_chunk(ctx, upload_file, json, json_size,
                            event_chunk->tag, flb_sds_len(event_chunk->tag),
@@ -1124,8 +1105,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             FLB_OUTPUT_RETURN(FLB_ERROR);
         }
 
-        //flb_sds_destroy(json);
-        //FLB_OUTPUT_RETURN(FLB_OK);
     } else {
         /* Buffering mode is disabled, proceed with regular flush */
         flb_plg_trace(ctx->ins, "payload size before compression %zu", json_size);
