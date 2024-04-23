@@ -476,9 +476,9 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
             flb_fstore_file_delete(ctx->fs, fsf);
         }
 
-        //flb_free(buffer);
-        //flb_sds_destroy(payload);
-        //flb_sds_destroy(tag_sds);
+        flb_free(buffer);
+        flb_sds_destroy(payload);
+        flb_sds_destroy(tag_sds);
         if (ret != FLB_OK) {
             flb_plg_error(ctx->ins, "Could not send chunk with tag %s",
                           (char *) fsf->meta_buf);
@@ -968,13 +968,15 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
     if (ctx->buffering_enabled == FLB_TRUE) {
 
+        cb_azure_kusto_ingest(config, ctx);
+
         ret = azure_kusto_load_ingestion_resources(ctx, config);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "cannot load ingestion resources");
             FLB_OUTPUT_RETURN(FLB_ERROR);
         }
 
-        flush_init(ctx);
+
 
         flb_plg_debug(ctx->ins,"event tag is  ::: %s", event_chunk->tag);
 
@@ -1110,16 +1112,16 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         if (ret == 0) {
             flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
-            //flb_sds_destroy(json);
+            flb_sds_destroy(json);
             FLB_OUTPUT_RETURN(FLB_OK);
         } else {
             flb_plg_error(ctx->ins, "failed to buffer chunk %s", event_chunk->tag);
-            //flb_sds_destroy(json);
+            flb_sds_destroy(json);
             FLB_OUTPUT_RETURN(FLB_ERROR);
         }
 
         //flb_sds_destroy(json);
-        FLB_OUTPUT_RETURN(FLB_OK);
+        //FLB_OUTPUT_RETURN(FLB_OK);
     } else {
         /* Buffering mode is disabled, proceed with regular flush */
         flb_plg_trace(ctx->ins, "payload size before compression %zu", json_size);
