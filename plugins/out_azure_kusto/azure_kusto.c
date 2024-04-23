@@ -973,7 +973,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
     if (ctx->buffering_enabled == FLB_TRUE) {
 
-        //flush_init(ctx);
+        flush_init(ctx);
 
         ret = azure_kusto_load_ingestion_resources(ctx, config);
         if (ret != 0) {
