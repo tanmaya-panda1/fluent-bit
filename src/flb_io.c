@@ -129,6 +129,10 @@ int flb_io_net_connect(struct flb_connection *connection,
     }
 
     flb_trace("[io] before performing flb_net_tcp_connect");
+    flb_trace("[io] before performing flb_net_tcp_connect %s :: %d", connection->upstream->tcp_host, connection->upstream->tcp_port);
+    flb_trace("[io] before performing flb_net_tcp_connect %s ", connection->stream->net.source_address);
+    flb_trace("[io] before performing flb_net_tcp_connect %d ", connection->stream->net.connect_timeout);
+    flb_trace("[io] before performing flb_net_tcp_connect %d ", async);
 
     /* Perform TCP connection */
     fd = flb_net_tcp_connect(connection->upstream->tcp_host,
