@@ -551,6 +551,8 @@ static struct flb_connection *create_conn(struct flb_upstream *u)
 
     coro = flb_coro_get();
 
+    flb_debug("[upstream] inside create_conn for %s:%i", u->tcp_host, u->tcp_port);
+
     conn = flb_connection_create(FLB_INVALID_SOCKET,
                                  FLB_UPSTREAM_CONNECTION,
                                  (void *) u,
@@ -559,6 +561,8 @@ static struct flb_connection *create_conn(struct flb_upstream *u)
     if (conn == NULL) {
         return NULL;
     }
+    flb_debug("[upstream] after flb_connection_create for %s:%i", u->tcp_host, u->tcp_port);
+
 
     conn->busy_flag = FLB_TRUE;
 
@@ -580,6 +584,8 @@ static struct flb_connection *create_conn(struct flb_upstream *u)
     flb_stream_release_lock(&u->base);
 
     flb_connection_reset_connection_timeout(conn);
+
+    flb_debug("[upstream] before flb_io_net_connect connection for %s:%i", u->tcp_host, u->tcp_port);
 
     /* Start connection */
     ret = flb_io_net_connect(conn, coro);
@@ -723,6 +729,7 @@ struct flb_connection *flb_upstream_conn_get(struct flb_upstream *u)
      * entries exists, just create a new one.
      */
     if (u->base.net.keepalive) {
+        flb_debug("[upstream] inside the keepalive connection" );
         mk_list_foreach_safe(head, tmp, &uq->av_queue) {
             conn = mk_list_entry(head, struct flb_connection, _head);
 
@@ -771,9 +778,13 @@ struct flb_connection *flb_upstream_conn_get(struct flb_upstream *u)
      * so we need to create a new one.
      */
     if (conn == NULL) {
+        flb_debug("[upstream] connection is null :: creating connection to %s:%i",
+                  u->tcp_host, u->tcp_port);
         conn = create_conn(u);
     }
 
+    flb_debug("[upstream] after creating connection to %s:%i",
+              u->tcp_host, u->tcp_port);
     if (conn != NULL) {
         flb_connection_reset_io_timeout(conn);
         flb_upstream_increment_busy_connections_count(u);
