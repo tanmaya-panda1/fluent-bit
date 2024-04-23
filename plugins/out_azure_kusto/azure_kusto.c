@@ -974,7 +974,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
     if (ctx->buffering_enabled == FLB_TRUE) {
 
-        flush_init(ctx);
+        //flush_init(ctx);
 
         ret = azure_kusto_load_ingestion_resources(ctx, config);
         if (ret != 0) {
@@ -1096,11 +1096,14 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                     flb_plg_error(ctx->ins, "unable to delete file ");
                     FLB_OUTPUT_RETURN(FLB_ERROR);
                 }
-                FLB_OUTPUT_RETURN(FLB_OK);
+                //upload_file = NULL;
             }else{
                 flb_plg_error(ctx->ins, "unable to ingest file ");
                 FLB_OUTPUT_RETURN(FLB_ERROR);
             }
+            flb_plg_info(ctx->ins, "this chunk of size is lost %zu",
+                         json_size);
+            FLB_OUTPUT_RETURN(FLB_OK);
         }
 
         /*flb_plg_info(ctx->ins, "before sending to buffer chunk %s",
@@ -1120,6 +1123,9 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             flb_sds_destroy(json);
             FLB_OUTPUT_RETURN(FLB_ERROR);
         }
+
+        //flb_sds_destroy(json);
+        //FLB_OUTPUT_RETURN(FLB_OK);
     } else {
         /* Buffering mode is disabled, proceed with regular flush */
         flb_plg_trace(ctx->ins, "payload size before compression %zu", json_size);
