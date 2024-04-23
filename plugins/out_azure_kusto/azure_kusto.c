@@ -1059,6 +1059,26 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             json_size = flb_sds_len(json);
         }
 
+        /* Compress the JSON payload */
+        if (ctx->compression_enabled == FLB_TRUE) {
+            ret = flb_gzip_compress((void *) json, json_size,
+                                    &final_payload, &final_payload_size);
+            if (ret != 0) {
+                flb_plg_error(ctx->ins,
+                              "cannot gzip payload");
+                flb_sds_destroy(json);
+                FLB_OUTPUT_RETURN(FLB_RETRY);
+            }
+            else {
+                is_compressed = FLB_TRUE;
+                flb_plg_debug(ctx->ins, "enabled payload gzip compression");
+                /* JSON buffer will be cleared at cleanup: */
+            }
+        } else {
+            final_payload = json;
+            final_payload_size = json_size;
+        }
+
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
         if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
             /* Load or refresh ingestion resources */
@@ -1069,7 +1089,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             }
 
             /* Send upload directly without upload queue */
-            ret = ingest_to_kusto_ext(ctx, json, upload_file,
+            ret = ingest_to_kusto_ext(ctx, final_payload, upload_file,
                                       event_chunk->tag,
                                       flb_sds_len(event_chunk->tag));
             if (ret == 0){
@@ -1091,7 +1111,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         }
 
         // Buffer current chunk in filesystem and wait for next chunk from engine
-        ret = buffer_chunk(ctx, upload_file, json, json_size,
+        ret = buffer_chunk(ctx, upload_file, final_payload, final_payload_size,
                            event_chunk->tag, flb_sds_len(event_chunk->tag),
                            file_first_log_time);
 
