@@ -345,7 +345,7 @@ static void add_comma_to_beginning(flb_sds_t *data) {
 /*
  * Either new_data or chunk can be NULL, but not both
  */
-static int construct_request_buffer_ext(struct flb_azure_kusto *ctx, flb_sds_t new_data,
+static int construct_request_buffer(struct flb_azure_kusto *ctx, flb_sds_t new_data,
                                     struct azure_kusto_file *upload_file,
                                     char **out_buf, size_t *out_size)
 {
@@ -405,76 +405,6 @@ static int construct_request_buffer_ext(struct flb_azure_kusto *ctx, flb_sds_t n
     }
 
     flb_plg_debug(ctx->ins, "[construct_request_buffer] final increased %zu", body_size);
-
-    *out_buf = body;
-    *out_size = body_size;
-
-    return 0;
-}
-
-static int construct_request_buffer(struct flb_azure_kusto *ctx, flb_sds_t new_data,
-                                    struct azure_kusto_file *upload_file,
-                                    char **out_buf, size_t *out_size)
-{
-    char *body = NULL;
-    size_t body_size = 0;
-    char *buffered_data = NULL;
-    size_t buffer_size = 0;
-    int ret;
-
-    if (new_data == NULL && upload_file == NULL) {
-        flb_plg_error(ctx->ins, "[construct_request_buffer] Something went wrong"
-                                " both chunk and new_data are NULL");
-        return -1;
-    }
-
-    if (upload_file) {
-        ret = azure_kusto_store_file_upload_read(ctx, upload_file->fsf, &buffered_data, &buffer_size);
-        if (ret < 0) {
-            flb_plg_error(ctx->ins, "Could not read locally buffered data %s",
-                          upload_file->file_path);
-            return -1;
-        }
-
-        /*
-         * lock the upload_file from buffer list
-         */
-        azure_kusto_store_file_lock(upload_file);
-    }
-
-    flb_plg_debug(ctx->ins, "[construct_request_buffer] size of buffer file read %zu", buffer_size);
-
-    /*
-     * If new data is arriving, allocate memory for the entire body
-     * and copy the buffered data and new data into it.
-     */
-    if (new_data) {
-        size_t new_data_size = flb_sds_len(new_data);
-        body_size = buffer_size + new_data_size;
-        flb_plg_debug(ctx->ins, "[construct_request_buffer] size of new_data %zu", new_data_size);
-
-        body = flb_malloc(body_size);
-        if (!body) {
-            flb_errno();
-            flb_free(buffered_data);
-            if (upload_file) {
-                azure_kusto_store_file_unlock(upload_file);
-            }
-            return -1;
-        }
-
-        if (buffered_data) {
-            memcpy(body, buffered_data, buffer_size);
-            flb_free(buffered_data);
-        }
-        memcpy(body + buffer_size, new_data, new_data_size);
-    }
-    else {
-        body = buffered_data;
-        body_size = buffer_size;
-    }
-
-    flb_plg_debug(ctx->ins, "[construct_request_buffer] final body size %zu", body_size);
 
     *out_buf = body;
     *out_size = body_size;
@@ -597,6 +527,9 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
     struct flb_azure_kusto *ctx = out_context;
     flb_sds_t payload;
     flb_sds_t tag_sds = flb_sds_create_len(tag, tag_len);
+    void *final_payload = NULL;
+    size_t final_payload_size = 0;
+    int is_compressed = FLB_FALSE;
 
     /* Create buffer to upload to S3 */
     ret = construct_request_buffer(ctx, new_data, upload_file, &buffer, &buffer_size);
@@ -613,8 +546,29 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
     /* modify the payload to add brackets and remove trailing comma to make a json array ready for ingestion */
     add_brackets_sds(&payload);
 
+
+    /* Compress the JSON payload */
+    if (ctx->compression_enabled == FLB_TRUE) {
+        ret = flb_gzip_compress((void *) payload, flb_sds_len(payload),
+                                &final_payload, &final_payload_size);
+        if (ret != 0) {
+            flb_plg_error(ctx->ins,
+                          "cannot gzip payload");
+            flb_sds_destroy(payload);
+            return -1;
+        }
+        else {
+            is_compressed = FLB_TRUE;
+            flb_plg_debug(ctx->ins, "enabled payload gzip compression");
+            /* JSON buffer will be cleared at cleanup: */
+        }
+    } else {
+        final_payload = payload;
+        final_payload_size = flb_sds_len(payload);
+    }
+
     // Call azure_kusto_queued_ingestion to ingest the payload
-    ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), payload, flb_sds_len(payload));
+    ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), final_payload, final_payload_size);
     if (ret != 0) {
         flb_plg_error(ctx->ins, "Failed to ingest data to Azure Blob");
         flb_sds_destroy(tag_sds);
@@ -624,6 +578,10 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
 
     flb_sds_destroy(tag_sds);
     flb_sds_destroy(payload);
+    /* release compressed payload */
+    if (is_compressed == FLB_TRUE) {
+        flb_free(final_payload);
+    }
 
     return 0;
 }
@@ -1130,26 +1088,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             json_size = flb_sds_len(json);
         }
 
-        /* Compress the JSON payload */
-        if (ctx->compression_enabled == FLB_TRUE) {
-            ret = flb_gzip_compress((void *) json, json_size,
-                                    &final_payload, &final_payload_size);
-            if (ret != 0) {
-                flb_plg_error(ctx->ins,
-                              "cannot gzip payload");
-                flb_sds_destroy(json);
-                FLB_OUTPUT_RETURN(FLB_RETRY);
-            }
-            else {
-                is_compressed = FLB_TRUE;
-                flb_plg_debug(ctx->ins, "enabled payload gzip compression");
-                /* JSON buffer will be cleared at cleanup: */
-            }
-        } else {
-            final_payload = json;
-            final_payload_size = json_size;
-        }
-
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
         if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
             /* Load or refresh ingestion resources */
@@ -1160,7 +1098,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             }
 
             /* Send upload directly without upload queue */
-            ret = ingest_to_kusto_ext(ctx, final_payload, upload_file,
+            ret = ingest_to_kusto_ext(ctx, json, upload_file,
                                       event_chunk->tag,
                                       flb_sds_len(event_chunk->tag));
             if (ret == 0){
@@ -1182,7 +1120,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         }
 
         // Buffer current chunk in filesystem and wait for next chunk from engine
-        ret = buffer_chunk(ctx, upload_file, final_payload, final_payload_size,
+        ret = buffer_chunk(ctx, upload_file, json, json_size,
                            event_chunk->tag, flb_sds_len(event_chunk->tag),
                            file_first_log_time);
 
