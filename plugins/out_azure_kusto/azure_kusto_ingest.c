@@ -168,7 +168,7 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
         flb_plg_error(ctx->ins, "upstream data is null");
         return -1;
     }
-    u_conn = flb_upstream_conn_get(u_node->u);
+    u_conn = flb_upstream_conn_get(ctx->u);
 
     flb_plg_debug(ctx->ins,"inside blob after upstream ha node get :: after getting connection");
     if (u_conn) {
