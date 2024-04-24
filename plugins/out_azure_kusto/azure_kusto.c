@@ -646,32 +646,6 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
             return -1;
         }
         flb_plg_info(ctx->ins, "Using upload size %lu bytes", ctx->file_size);
-
-
-        /*mk_list_init(&ctx->buffer_files);
-        ctx->current_file_path = NULL;
-        ctx->current_file = NULL;
-        ctx->current_file_size = 0;
-        ctx->ins = ins;
-
-        ctx->retry_time = 0;
-
-        type = FLB_FSTORE_FS;
-
-        fs = flb_fstore_create(ctx->buffer_dir, type);
-        if (!fs) {
-            return -1;
-        }
-
-        sched = flb_sched_ctx_get();
-
-        // Start the timer for ingestion to Azure Kusto
-        int ret = flb_sched_timer_cb_create(sched, FLB_SCHED_TIMER_CB_PERM, 6000, ingest_to_kusto, ctx, NULL);
-        if (ret == -1) {
-            flb_plg_error(ins, "Failed to start ingestion timer");
-            flb_free(ctx);
-            return -1;
-        }*/
     }
 
     flb_output_set_context(ins, ctx);
