@@ -339,16 +339,6 @@ int azure_kusto_store_init(struct flb_azure_kusto *ctx)
     }
     ctx->stream_active = fs_stream;
 
-    /* Multipart upload stream */
-    /*fs_stream = flb_fstore_stream_create(ctx->fs, "multipart_upload_metadata");
-    if (!fs_stream) {
-        flb_plg_error(ctx->ins, "could not initialize multipart_upload stream");
-        flb_fstore_destroy(fs);
-        ctx->fs = NULL;
-        return -1;
-    }
-    ctx->stream_upload = fs_stream;*/
-
     set_files_context(ctx);
     return 0;
 }

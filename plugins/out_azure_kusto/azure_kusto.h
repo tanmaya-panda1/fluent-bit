@@ -121,11 +121,6 @@ struct flb_azure_kusto {
 
     pthread_mutex_t blob_mutex;
 
-    struct mk_list buffer_files;
-    flb_sds_t current_file_path;
-    FILE *current_file;
-    size_t current_file_size;
-
     int buffering_enabled;
 
     size_t file_size;

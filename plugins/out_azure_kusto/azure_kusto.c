@@ -413,7 +413,7 @@ static int construct_request_buffer(struct flb_azure_kusto *ctx, flb_sds_t new_d
 }
 
 
-static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
+static int cb_azure_kusto_ingest(struct flb_config *config, void *data)
 {
     struct flb_azure_kusto *ctx = data;
     struct azure_kusto_file *file = NULL;
@@ -462,7 +462,7 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
         ret = azure_kusto_load_ingestion_resources(ctx, config);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "cannot load ingestion resources");
-            FLB_OUTPUT_RETURN(FLB_ERROR);
+            return -1;
         }
 
         flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest ::: before starting kusto queued ingestion %s", file->fsf->name);
@@ -480,12 +480,13 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
         flb_free(buffer);
         flb_sds_destroy(payload);
         flb_sds_destroy(tag_sds);
-        if (ret != FLB_OK) {
+        if (ret != 0) {
             flb_plg_error(ctx->ins, "Could not send chunk with tag %s",
                           (char *) fsf->meta_buf);
         }
     }
     flb_plg_debug(ctx->ins, "Exited upload timer callback (cb_azure_kusto_ingest)..");
+    return ret;
 }
 
 void add_brackets_sds(flb_sds_t *data) {
@@ -580,65 +581,6 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
     /* release compressed payload */
     if (is_compressed == FLB_TRUE) {
         flb_free(final_payload);
-    }
-
-    return 0;
-}
-
-
-// Timer callback to ingest data to Azure Kusto
-static int ingest_to_kusto(struct flb_config *config, struct flb_sched_timer *timer, void *data)
-{
-    struct flb_azure_kusto *ctx = data;
-    struct mk_list *head;
-    struct mk_list *tmp;
-    struct flb_azure_buffer_file_metadata *metadata;
-    time_t current_time = time(NULL);
-
-    mk_list_foreach_safe(head, tmp, &ctx->buffer_files) {
-        metadata = mk_list_entry(head, struct flb_azure_buffer_file_metadata, _head);
-
-        // Check if file is not locked and exceeds the maximum file size or wait time
-        if (!metadata->locked && (metadata->file_size > FLB_AZURE_KUSTO_BUFFER_MAX_FILE_SIZE ||
-                                  current_time - metadata->last_modified_time > FLB_AZURE_KUSTO_BUFFER_MAX_FILE_WAIT_TIME)) {
-            // Read the contents of the buffer file
-            flb_sds_t payload = flb_sds_create_len(NULL, metadata->file_size);
-            FILE *file = fopen(metadata->file_path, "rb");
-            if (file) {
-                size_t bytes_read = fread(payload, 1, metadata->file_size, file);
-                if (bytes_read != metadata->file_size) {
-                    flb_plg_error(ctx->ins, "Failed to read buffer file: %s", metadata->file_path);
-                }
-                fclose(file);
-            } else {
-                flb_plg_error(ctx->ins, "Failed to open buffer file: %s", metadata->file_path);
-            }
-
-            int ret = azure_kusto_load_ingestion_resources(ctx, config);
-            if (ret != 0) {
-                flb_plg_error(ctx->ins, "cannot load ingestion resources");
-            }
-
-            // Call azure_kusto_queued_ingestion to ingest the payload
-            ret = azure_kusto_queued_ingestion(ctx, metadata->event_tag, metadata->tag_len, payload, metadata->file_size);
-            if (ret != 0) {
-                flb_plg_error(ctx->ins, "Failed to ingest data to Azure Blob");
-            }
-
-            // Remove the file from the buffer directory
-            if (remove(metadata->file_path) == -1) {
-                flb_plg_error(ctx->ins, "Failed to remove buffer file: %s", metadata->file_path);
-            }
-
-            // Remove the metadata from the list and free memory
-            mk_list_del(&metadata->_head);
-            flb_sds_destroy(metadata->file_path);
-            flb_sds_destroy(metadata->event_tag);
-            flb_free(metadata);
-
-            // Free the payload
-            flb_sds_destroy(payload);
-        }
     }
 
     return 0;
@@ -898,7 +840,7 @@ static int buffer_chunk(void *out_context, struct azure_kusto_file *upload_file,
     return 0;
 }
 
-static void flush_init(void *out_context)
+static void flush_init(void *out_context, struct flb_config *config)
 {
     int ret;
     struct flb_azure_kusto *ctx = out_context;
@@ -911,7 +853,7 @@ static void flush_init(void *out_context)
                      "executions to kusto; buffer=%s",
                      ctx->fs->root_path);
         ctx->has_old_buffers = FLB_FALSE;
-        /*ret = put_all_chunks(ctx);
+        ret = cb_azure_kusto_ingest(config, ctx);
         if (ret < 0) {
             ctx->has_old_buffers = FLB_TRUE;
             flb_plg_error(ctx->ins,
@@ -919,7 +861,7 @@ static void flush_init(void *out_context)
                           "from previous executions; will retry. Buffer=%s",
                           ctx->fs->root_path);
             FLB_OUTPUT_RETURN(FLB_RETRY);
-        }*/
+        }
     }
 
     /*
@@ -927,7 +869,7 @@ static void flush_init(void *out_context)
      * are ready for completion
      * this is created once on the first flush
      */
-    if (ctx->timer_created == FLB_FALSE) {
+    /*if (ctx->timer_created == FLB_FALSE) {
         flb_plg_debug(ctx->ins,
                       "Creating upload timer with frequency %ds",
                       ctx->timer_ms / 1000);
@@ -940,7 +882,7 @@ static void flush_init(void *out_context)
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
         ctx->timer_created = FLB_TRUE;
-    }
+    }*/
 }
 
 static void remove_brackets_sds(flb_sds_t *data) {
@@ -998,7 +940,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
     if (ctx->buffering_enabled == FLB_TRUE) {
 
-        //flush_init(ctx);
+        //flush_init(ctx,config);
 
         ret = azure_kusto_load_ingestion_resources(ctx, config);
         if (ret != 0) {
@@ -1204,31 +1146,13 @@ static int cb_azure_kusto_exit(void *data, struct flb_config *config)
         ctx->u = NULL;
     }
 
-    // Close the current buffer file if it exists
-    if (ctx->current_file) {
-        fclose(ctx->current_file);
-        ctx->current_file = NULL;
-    }
-
-    // Free the current file path
-    if (ctx->current_file_path) {
-        flb_sds_destroy(ctx->current_file_path);
-        ctx->current_file_path = NULL;
-    }
-    
-    // Free the buffer files
-    mk_list_foreach_safe(head, tmp, &ctx->buffer_files) {
-        metadata = mk_list_entry(head, struct flb_azure_buffer_file_metadata, _head);
-        mk_list_del(&metadata->_head);
-        flb_sds_destroy(metadata->file_path);
-        flb_sds_destroy(metadata->event_tag);
-        flb_free(metadata);
-    }
 
     // Destroy the mutexes
     pthread_mutex_destroy(&ctx->resources_mutex);
     pthread_mutex_destroy(&ctx->token_mutex);
     pthread_mutex_destroy(&ctx->blob_mutex);
+
+    azure_kusto_store_exit(ctx);
 
     flb_azure_kusto_conf_destroy(ctx);
 
