@@ -533,7 +533,6 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
 
     /* Create buffer to upload to S3 */
     ret = construct_request_buffer(ctx, new_data, upload_file, &buffer, &buffer_size);
-    //flb_sds_destroy(new_data);
     if (ret < 0) {
         flb_plg_error(ctx->ins, "Could not construct request buffer for %s",
                       upload_file->file_path);
