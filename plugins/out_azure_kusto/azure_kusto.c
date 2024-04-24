@@ -1288,16 +1288,15 @@ static struct flb_config_map config_map[] = {
     {FLB_CONFIG_MAP_STR, "buffer_dir", "/tmp/fluent-bit/azure-kusto/", 0, FLB_TRUE,
             offsetof(struct flb_azure_kusto, buffer_dir), "Specifies the location of directory where the buffered data will be stored."
     },
-    {FLB_CONFIG_MAP_TIME, "upload_timeout", "10m",
+    {FLB_CONFIG_MAP_TIME, "upload_timeout", "30m",
             0, FLB_TRUE, offsetof(struct flb_azure_kusto, upload_timeout),
     "Optionally specify a timeout for uploads. "
-    "Whenever this amount of time has elapsed, Fluent Bit will complete an "
-    "upload and create a new file in S3. For example, set this value to 60m "
-    "and you will get a new file in S3 every hour. Default is 10m."
+    "Fluent Bit will start ingesting buffer files which have been created more than x minutes and haven't reached upload_file_size limit yet.  "
+    " Default is 30m."
     },
-    {FLB_CONFIG_MAP_SIZE, "upload_file_size", "500000000",
+    {FLB_CONFIG_MAP_SIZE, "upload_file_size", "200M",
             0, FLB_TRUE, offsetof(struct flb_azure_kusto, file_size),
-    "Specifies the size of files to be uploaded. Default is 500MB"
+    "Specifies the size of files to be uploaded in MBs. Default is 200MB"
     },
     {FLB_CONFIG_MAP_TIME, "ingestion_resources_refresh_interval", FLB_AZURE_KUSTO_RESOURCES_LOAD_INTERVAL_SEC,0, FLB_TRUE,
           offsetof(struct flb_azure_kusto, ingestion_resources_refresh_interval),
