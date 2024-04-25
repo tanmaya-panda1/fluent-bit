@@ -127,8 +127,6 @@ struct flb_azure_kusto {
     size_t upload_chunk_size;
     time_t upload_timeout;
     time_t retry_time;
-    int timer_created;
-    int timer_ms;
 
     int has_old_buffers;
     size_t store_dir_limit_size;
@@ -139,7 +137,7 @@ struct flb_azure_kusto {
     struct flb_fstore *fs;
     struct flb_fstore_stream *stream_active;  /* default active stream */
     struct flb_fstore_stream *stream_upload;
-    struct flb_fstore_stream *stream_metadata; /* s3 metadata stream */
+    struct flb_fstore_stream *stream_metadata; /* metadata stream */
 
 
     /* Upstream connection to the backend server */

@@ -60,7 +60,7 @@ static flb_sds_t gen_store_filename(const char *tag)
     return hash_str;
 }
 
-/* Retrieve a candidate s3 local file using the tag */
+/* Retrieve a candidate buffer file using the tag */
 struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx, const char *tag,
                                   int tag_len)
 {

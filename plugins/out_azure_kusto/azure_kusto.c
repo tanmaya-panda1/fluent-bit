@@ -18,24 +18,17 @@
  */
 
 #include <fluent-bit/flb_http_client.h>
-#include <fluent-bit/flb_kv.h>
 #include <fluent-bit/flb_oauth2.h>
 #include <fluent-bit/flb_output_plugin.h>
 #include <fluent-bit/flb_pack.h>
-#include <fluent-bit/flb_signv4.h>
 #include <fluent-bit/flb_log_event_decoder.h>
 #include <fluent-bit/flb_scheduler.h>
 #include <fluent-bit/flb_gzip.h>
 #include <fluent-bit/flb_utils.h>
-#include <fluent-bit/flb_time.h>
-#include <dirent.h>
-#include <sys/stat.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <fluent-bit/flb_sds.h>
 #include <fluent-bit/flb_fstore.h>
-#include <fluent-bit/flb_log_event_decoder.h>
-#include <stdlib.h>
 #include <msgpack.h>
 
 #include "azure_kusto.h"
@@ -234,97 +227,6 @@ flb_sds_t execute_ingest_csl_command(struct flb_azure_kusto *ctx, const char *cs
     return resp;
 }
 
-/*
- * return value is one of FLB_OK, FLB_RETRY, FLB_ERROR
- *
- * Chunk is allowed to be NULL
- *//*
-static int upload_data(struct flb_azure_kusto *ctx, struct azure_kusto_file *chunk,
-                       char *body, size_t body_size,
-                       const char *tag, int tag_len)
-{
-    int init_upload = FLB_FALSE;
-    int complete_upload = FLB_FALSE;
-    int size_check = FLB_FALSE;
-    int part_num_check = FLB_FALSE;
-    int timeout_check = FLB_FALSE;
-    int ret;
-    void *payload_buf = NULL;
-    size_t payload_size = 0;
-    size_t preCompress_size = 0;
-    time_t file_first_log_time = time(NULL);
-
-    *//*
-     * When chunk does not exist, file_first_log_time will be the current time.
-     * This is only for unit tests and prevents unit tests from segfaulting when chunk is
-     * NULL because if so chunk->first_log_time will be NULl either and will cause
-     * segfault during the process of put_object upload or mutipart upload.
-     *//*
-    if (chunk != NULL) {
-        file_first_log_time = chunk->first_log_time;
-    }
-
-    if (ctx->compression_enabled == FLB_TRUE) {
-        *//* Map payload *//*
-        ret = flb_aws_compression_compress(ctx->compression, body, body_size, &payload_buf, &payload_size);
-        if (ret == -1) {
-            flb_plg_error(ctx->ins, "Failed to compress data");
-            return FLB_RETRY;
-        } else {
-            preCompress_size = body_size;
-            body = (void *) payload_buf;
-            body_size = payload_size;
-        }
-    }
-
-    if (ctx->use_put_object == FLB_TRUE) {
-        goto put_object;
-    }
-
-
-        if (chunk != NULL && time(NULL) >
-                             (chunk->create_time + ctx->upload_timeout + ctx->retry_time)) {
-            *//* timeout already reached, just PutObject *//*
-            goto put_object;
-        }
-        else if (body_size >= ctx->file_size) {
-            *//* already big enough, just use PutObject API *//*
-            goto put_object;
-        }
-        else {
-            if (ctx->use_put_object == FLB_FALSE && ctx->compression == FLB_AWS_COMPRESS_GZIP) {
-                flb_plg_info(ctx->ins, "Pre-compression upload_chunk_size= %zu, After compression, chunk is only %zu bytes, "
-                                       "the chunk was too small, using PutObject to upload", preCompress_size, body_size);
-            }
-            goto put_object;
-        }
-
-    put_object:
-
-    *//*
-     * remove chunk from buffer list
-     *//*
-    ret = s3_put_object(ctx, tag, file_first_log_time, body, body_size);
-    if (ctx->compression == FLB_AWS_COMPRESS_GZIP) {
-        flb_free(payload_buf);
-    }
-    if (ret < 0) {
-        *//* re-add chunk to list *//*
-        if (chunk) {
-            s3_store_file_unlock(chunk);
-            chunk->failures += 1;
-        }
-        return FLB_RETRY;
-    }
-
-    *//* data was sent successfully- delete the local buffer *//*
-    if (chunk) {
-        azure_kusto_store_file_delete(ctx, chunk);
-    }
-
-    return FLB_OK;
-}*/
-
 
 static void add_comma_to_beginning(flb_sds_t *data) {
     size_t len = flb_sds_len(*data);
@@ -517,7 +419,7 @@ void add_brackets_sds(flb_sds_t *data) {
     *data = tmp;
 }
 
-// Timer callback to ingest data to Azure Kusto
+/* ingest data to Azure Kusto */
 static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
                                struct azure_kusto_file *upload_file,
                                const char *tag, int tag_len)
@@ -532,7 +434,7 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
     size_t final_payload_size = 0;
     int is_compressed = FLB_FALSE;
 
-    /* Create buffer to upload to S3 */
+    /* Create buffer */
     ret = construct_request_buffer(ctx, new_data, upload_file, &buffer, &buffer_size);
     if (ret < 0) {
         flb_plg_error(ctx->ins, "Could not construct request buffer for %s",
@@ -619,18 +521,6 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
                           ctx->store_dir);
             return -1;
         }
-
-        ctx->timer_created = FLB_FALSE;
-        /*ctx->timer_ms = (int) (ctx->upload_timeout / 6) * 1000;
-        if (ctx->timer_ms > UPLOAD_TIMER_MAX_WAIT) {
-            ctx->timer_ms = UPLOAD_TIMER_MAX_WAIT;
-        }
-        else if (ctx->timer_ms < UPLOAD_TIMER_MIN_WAIT) {
-            ctx->timer_ms = UPLOAD_TIMER_MIN_WAIT;
-        }*/
-
-        ctx->timer_ms = 60000; // 1 min
-        flb_plg_debug(ins, "final timer_ms is  %d", ctx->timer_ms);
 
         /* validate 'total_file_size' */
         if (ctx->file_size <= 0) {
@@ -789,12 +679,6 @@ static int azure_kusto_format(struct flb_azure_kusto *ctx, const char *tag, int 
     return 0;
 }
 
-static int64_t get_current_time_milliseconds() {
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    return (int64_t)ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
-}
-
 static int buffer_chunk(void *out_context, struct azure_kusto_file *upload_file,
                         flb_sds_t chunk, int chunk_size,
                         const char *tag, int tag_len,
@@ -818,7 +702,6 @@ static void flush_init(void *out_context, struct flb_config *config)
 {
     int ret;
     struct flb_azure_kusto *ctx = out_context;
-    struct flb_sched *sched;
 
     /* clean up any old buffers found on startup */
     if (ctx->has_old_buffers == FLB_TRUE) {
@@ -837,26 +720,6 @@ static void flush_init(void *out_context, struct flb_config *config)
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
     }
-
-    /*
-     * create a timer that will run periodically and check if uploads
-     * are ready for completion
-     * this is created once on the first flush
-     */
-    /*if (ctx->timer_created == FLB_FALSE) {
-        flb_plg_debug(ctx->ins,
-                      "Creating upload timer with frequency %ds",
-                      ctx->timer_ms / 1000);
-
-        sched = flb_sched_ctx_get();
-        ret = flb_sched_timer_cb_create(sched, FLB_SCHED_TIMER_CB_PERM,
-                                            ctx->timer_ms, cb_azure_kusto_ingest, ctx, NULL);
-        if (ret == -1) {
-            flb_plg_error(ctx->ins, "Failed to create upload timer");
-            FLB_OUTPUT_RETURN(FLB_RETRY);
-        }
-        ctx->timer_created = FLB_TRUE;
-    }*/
 }
 
 static void remove_brackets_sds(flb_sds_t *data) {
@@ -1106,10 +969,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 static int cb_azure_kusto_exit(void *data, struct flb_config *config)
 {
     struct flb_azure_kusto *ctx = data;
-
-    struct mk_list *head;
-    struct mk_list *tmp;
-    struct flb_azure_buffer_file_metadata *metadata;
 
     if (!ctx) {
         return -1;
