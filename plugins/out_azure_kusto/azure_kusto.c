@@ -434,6 +434,11 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
     size_t final_payload_size = 0;
     int is_compressed = FLB_FALSE;
 
+    if (pthread_mutex_lock(&ctx->buffer_mutex)) {
+        flb_plg_error(ctx->ins, "error unlocking mutex");
+        return -1;
+    }
+
     /* Create buffer */
     ret = construct_request_buffer(ctx, new_data, upload_file, &buffer, &buffer_size);
     if (ret < 0) {
@@ -467,6 +472,11 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
     } else {
         final_payload = payload;
         final_payload_size = flb_sds_len(payload);
+    }
+
+    if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
+        flb_plg_error(ctx->ins, "error unlocking mutex");
+        return -1;
     }
 
     // Call azure_kusto_queued_ingestion to ingest the payload
@@ -872,6 +882,11 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             json_size = flb_sds_len(json);
         }
 
+        if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
+            flb_plg_error(ctx->ins, "error unlocking mutex");
+            FLB_OUTPUT_RETURN(FLB_RETRY);
+        }
+
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
         if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
             /* Load or refresh ingestion resources */
@@ -903,6 +918,11 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             }
         }
 
+        if (pthread_mutex_lock(&ctx->buffer_mutex)) {
+            flb_plg_error(ctx->ins, "error unlocking mutex");
+            FLB_OUTPUT_RETURN(FLB_RETRY);
+        }
+
         // Buffer current chunk in filesystem and wait for next chunk from engine
         ret = buffer_chunk(ctx, upload_file, json, json_size,
                            event_chunk->tag, flb_sds_len(event_chunk->tag),
@@ -912,6 +932,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             flb_plg_error(ctx->ins, "error unlocking mutex");
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
+
 
         if (ret == 0) {
             flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
