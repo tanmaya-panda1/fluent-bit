@@ -551,6 +551,7 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
     pthread_mutex_init(&ctx->token_mutex, NULL);
     pthread_mutex_init(&ctx->resources_mutex, NULL);
     pthread_mutex_init(&ctx->blob_mutex, NULL);
+    pthread_mutex_init(&ctx->buffer_mutex, NULL);
 
     /*
      * Create upstream context for Kusto Ingestion endpoint
@@ -787,6 +788,11 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         flb_plg_debug(ctx->ins,"event tag is  ::: %s", event_chunk->tag);
 
+        if (pthread_mutex_lock(&ctx->buffer_mutex)) {
+            flb_plg_error(ctx->ins, "error locking mutex");
+            FLB_OUTPUT_RETURN(FLB_RETRY);
+        }
+
         /* Get a file candidate matching the given 'tag' */
         upload_file = azure_kusto_store_file_get(ctx,
                                         event_chunk->tag,
@@ -902,6 +908,11 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                            event_chunk->tag, flb_sds_len(event_chunk->tag),
                            file_first_log_time);
 
+        if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
+            flb_plg_error(ctx->ins, "error unlocking mutex");
+            FLB_OUTPUT_RETURN(FLB_RETRY);
+        }
+
         if (ret == 0) {
             flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
             flb_sds_destroy(json);
@@ -984,6 +995,7 @@ static int cb_azure_kusto_exit(void *data, struct flb_config *config)
     pthread_mutex_destroy(&ctx->resources_mutex);
     pthread_mutex_destroy(&ctx->token_mutex);
     pthread_mutex_destroy(&ctx->blob_mutex);
+    pthread_mutex_destroy(&ctx->buffer_mutex);
 
     azure_kusto_store_exit(ctx);
 

@@ -121,6 +121,8 @@ struct flb_azure_kusto {
 
     pthread_mutex_t blob_mutex;
 
+    pthread_mutex_t buffer_mutex;
+
     int buffering_enabled;
 
     size_t file_size;
