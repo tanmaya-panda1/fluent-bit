@@ -93,7 +93,7 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
 
         /* compare meta and tag */
         if (strncmp((char *) fsf->name, tag, tag_len) == 0 ) {
-            flb_plg_debug(ctx->ins, "Found matching file '%s' for tag and file size is less than 100MB '%.*s'", fsf->name, tag_len, tag);
+            flb_plg_debug(ctx->ins, "Found matching file '%s' for tag '%.*s'", fsf->name, tag_len, tag);
             break;
         }
 
@@ -144,7 +144,6 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
 
     /* If no target file was found, create a new one */
     if (!azure_kusto_file || azure_kusto_file == NULL) {
-        flb_plg_error(ctx->ins, "inside azure_kusto_store_buffer_put function :: inside azure_kusto_file == NULL");
         name = flb_sds_create_len(tag, tag_len);
         if (!name) {
             flb_plg_error(ctx->ins, "could not generate chunk file name");
@@ -165,7 +164,6 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         /* Write tag as metadata */
         ret = flb_fstore_file_meta_set(ctx->fs, fsf, (char *) tag, tag_len);
         if (ret == -1) {
-            flb_plg_error(ctx->ins, "error writing tag metadata");
             flb_plg_warn(ctx->ins, "Deleting buffer file because metadata could not be written");
             flb_fstore_file_delete(ctx->fs, fsf);
             return -1;
@@ -175,7 +173,6 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         azure_kusto_file = flb_calloc(1, sizeof(struct azure_kusto_file));
         if (!azure_kusto_file) {
             flb_errno();
-            flb_plg_error(ctx->ins, "cannot allocate azure_kusto file context");
             flb_plg_warn(ctx->ins, "Deleting buffer file because azure_kusto context creation failed");
             flb_fstore_file_delete(ctx->fs, fsf);
             return -1;
@@ -301,7 +298,12 @@ int azure_kusto_store_init(struct flb_azure_kusto *ctx)
     type = FLB_FSTORE_FS;
 
     /* Initialize the storage context */
-    snprintf(tmp, sizeof(tmp), "%s/%s", ctx->buffer_dir, ctx->azure_kusto_buffer_key);
+    if (ctx->buffer_dir[strlen(ctx->buffer_dir) - 1] == '/') {
+        snprintf(tmp, sizeof(tmp), "%s%s", ctx->buffer_dir, ctx->azure_kusto_buffer_key);
+    }
+    else {
+        snprintf(tmp, sizeof(tmp), "%s/%s", ctx->buffer_dir, ctx->azure_kusto_buffer_key);
+    }
 
     /* Initialize the storage context */
     fs = flb_fstore_create(tmp, type);
