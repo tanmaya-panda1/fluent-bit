@@ -301,7 +301,10 @@ int azure_kusto_store_init(struct flb_azure_kusto *ctx)
     type = FLB_FSTORE_FS;
 
     /* Initialize the storage context */
-    fs = flb_fstore_create(ctx->buffer_dir, type);
+    snprintf(tmp, sizeof(tmp), "%s/%s", ctx->buffer_dir, ctx->azure_kusto_buffer_key);
+
+    /* Initialize the storage context */
+    fs = flb_fstore_create(tmp, type);
     if (!fs) {
         return -1;
     }

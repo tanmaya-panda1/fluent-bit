@@ -1100,6 +1100,10 @@ static struct flb_config_map config_map[] = {
           offsetof(struct flb_azure_kusto, ingestion_resources_refresh_interval),
           "Set the azure kusto ingestion resources refresh interval"
     },
+    {FLB_CONFIG_MAP_STR, "azure_kusto_buffer_key", "key",0, FLB_TRUE,
+     offsetof(struct flb_azure_kusto, azure_kusto_buffer_key),
+    "Set the azure kusto buffer key"
+    },
     /* EOF */
     {0}};
 
