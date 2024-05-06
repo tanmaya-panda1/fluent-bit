@@ -778,14 +778,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
     tag_len = flb_sds_len(event_chunk->tag);
 
-    /* Reformat msgpack to JSON payload */
-    ret = azure_kusto_format(ctx, event_chunk->tag, tag_len, event_chunk->data,
-                             event_chunk->size, (void **)&json, &json_size);
-    if (ret != 0) {
-        flb_plg_error(ctx->ins, "cannot reformat data into json");
-        FLB_OUTPUT_RETURN(FLB_RETRY);
-    }
-
     if (ctx->buffering_enabled == FLB_TRUE) {
 
         flush_init(ctx,config);
@@ -800,6 +792,14 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         if (pthread_mutex_lock(&ctx->buffer_mutex)) {
             flb_plg_error(ctx->ins, "error locking mutex");
+            FLB_OUTPUT_RETURN(FLB_RETRY);
+        }
+
+        /* Reformat msgpack to JSON payload */
+        ret = azure_kusto_format(ctx, event_chunk->tag, tag_len, event_chunk->data,
+                                 event_chunk->size, (void **)&json, &json_size);
+        if (ret != 0) {
+            flb_plg_error(ctx->ins, "cannot reformat data into json");
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
 
@@ -919,7 +919,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         }
 
         if (pthread_mutex_lock(&ctx->buffer_mutex)) {
-            flb_plg_error(ctx->ins, "error unlocking mutex");
+            flb_plg_error(ctx->ins, "error locking mutex");
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
 
@@ -946,6 +946,15 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
     } else {
         /* Buffering mode is disabled, proceed with regular flush */
+
+        /* Reformat msgpack to JSON payload */
+        ret = azure_kusto_format(ctx, event_chunk->tag, tag_len, event_chunk->data,
+                                 event_chunk->size, (void **)&json, &json_size);
+        if (ret != 0) {
+            flb_plg_error(ctx->ins, "cannot reformat data into json");
+            FLB_OUTPUT_RETURN(FLB_RETRY);
+        }
+
         flb_plg_trace(ctx->ins, "payload size before compression %zu", json_size);
         /* Map buffer */
         final_payload = json;
