@@ -68,6 +68,7 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
     struct mk_list *tmp;
     struct flb_fstore_file *fsf = NULL;
     struct azure_kusto_file *azure_kusto_file;
+    int found = 0;
 
     /*
      * Based in the current ctx->stream_name, locate a candidate file to
@@ -86,7 +87,6 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
         azure_kusto_file = fsf->data;
         if (azure_kusto_file->locked == FLB_TRUE) {
             flb_plg_debug(ctx->ins, "File '%s' is locked, skipping", fsf->name);
-            fsf = NULL;
             continue;
         }
 
@@ -94,14 +94,12 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
         /* compare meta and tag */
         if (strncmp((char *) fsf->name, tag, tag_len) == 0 ) {
             flb_plg_debug(ctx->ins, "Found matching file '%s' for tag '%.*s'", fsf->name, tag_len, tag);
+            found = 1;
             break;
         }
-
-        /* not found, invalidate the reference */
-        fsf = NULL;
     }
 
-    if (!fsf) {
+    if (!found) {
         return NULL;
     }
 
