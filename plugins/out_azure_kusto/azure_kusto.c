@@ -809,7 +809,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                         event_chunk->size);
 
         if (upload_file == NULL) {
-            flb_plg_debug(ctx->ins, "upload_file is NULL or size exceeded, creating new file");
+            flb_plg_trace(ctx->ins, "no matching file found for event tag, creating new file");
             ret = flb_log_event_decoder_init(&log_decoder,
                                              (char *) event_chunk->data,
                                              event_chunk->size);
@@ -855,13 +855,13 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         if (upload_file != NULL && time(NULL) >
                                    (upload_file->create_time + ctx->upload_timeout)) {
             upload_timeout_check = FLB_TRUE;
-            flb_plg_debug(ctx->ins, "upload_timeout reached for %s",
+            flb_plg_trace(ctx->ins, "upload_timeout reached for %s",
                          event_chunk->tag);
         }
 
         /* If total_file_size has been reached, upload file */
         if (upload_file && upload_file->size + json_size > ctx->file_size) {
-            flb_plg_debug(ctx->ins, "total_file_size exceeded %s",
+            flb_plg_trace(ctx->ins, "total_file_size exceeded %s",
                          event_chunk->tag);
             total_file_size_check = FLB_TRUE;
         }
@@ -876,6 +876,14 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
             // Set the new length of the data string
             flb_sds_len_set(json, json_size);
+
+            //trim empty spaces, tabs, newlines and null characters from the end and beginning of the string
+            while (json_size > 0 && (json[json_size - 1] == ' ' || json[json_size - 1] == '\n' || json[json_size - 1] == '\t' || json[json_size - 1] == '\0') &&
+                (json[0] == ' ' || json[0] == '\n' || json[0] == '\t' || json[0] == '\0')
+            ) {
+                json_size--;
+                flb_sds_len_set(json, json_size);
+            }
 
             // Add a comma to the end
             json = flb_sds_cat(json, ",", 1);
@@ -1102,7 +1110,7 @@ static struct flb_config_map config_map[] = {
     },
     {FLB_CONFIG_MAP_STR, "azure_kusto_buffer_key", "key",0, FLB_TRUE,
      offsetof(struct flb_azure_kusto, azure_kusto_buffer_key),
-    "Set the azure kusto buffer key"
+    "Set the azure kusto buffer key which needs to be specified when using multiple instances of azure kusto output plugin and buffering is enabled"
     },
     /* EOF */
     {0}};
