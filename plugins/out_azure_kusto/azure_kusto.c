@@ -877,14 +877,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             // Set the new length of the data string
             flb_sds_len_set(json, json_size);
 
-            //trim empty spaces, tabs, newlines and null characters from the end and beginning of the string
-            while (json_size > 0 && (json[json_size - 1] == ' ' || json[json_size - 1] == '\n' || json[json_size - 1] == '\t' || json[json_size - 1] == '\0') &&
-                (json[0] == ' ' || json[0] == '\n' || json[0] == '\t' || json[0] == '\0')
-            ) {
-                json_size--;
-                flb_sds_len_set(json, json_size);
-            }
-
             // Add a comma to the end
             json = flb_sds_cat(json, ",", 1);
             json_size = flb_sds_len(json);
