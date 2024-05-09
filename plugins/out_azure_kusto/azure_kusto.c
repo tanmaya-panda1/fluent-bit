@@ -669,7 +669,16 @@ static int azure_kusto_format(struct flb_azure_kusto *ctx, const char *tag, int 
 
         msgpack_pack_str(&mp_pck, flb_sds_len(ctx->log_key));
         msgpack_pack_str_body(&mp_pck, ctx->log_key, flb_sds_len(ctx->log_key));
-        msgpack_pack_object(&mp_pck, *log_event.body);
+
+        /* Check if log_event.body is available */
+        if (log_event.body != NULL) {
+            msgpack_pack_object(&mp_pck, *log_event.body);
+        } else {
+            /* Handle missing "log" attribute */
+            /* Pack a default value */
+            msgpack_pack_str(&mp_pck, 20);
+            msgpack_pack_str_body(&mp_pck, "log_attribute_missing", 20);
+        }
     }
 
     /* Convert from msgpack to JSON */
