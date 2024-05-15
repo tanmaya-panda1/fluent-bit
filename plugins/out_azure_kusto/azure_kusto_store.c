@@ -124,8 +124,7 @@ int flb_fstore_file_exists(struct flb_fstore *fs, flb_sds_t name)
 /* Append data to a new or existing fstore file */
 int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file,
                         const char *tag, int tag_len,
-                        flb_sds_t data, size_t bytes,
-                        time_t file_first_log_time)
+                        flb_sds_t data, size_t bytes)
 {
     int ret;
     flb_sds_t name;
@@ -176,7 +175,6 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
             return -1;
         }
         azure_kusto_file->fsf = fsf;
-        azure_kusto_file->first_log_time = file_first_log_time;
         azure_kusto_file->create_time = time(NULL);
 
         /* Use fstore opaque 'data' reference to keep our context */
@@ -271,7 +269,6 @@ static int set_files_context(struct flb_azure_kusto *ctx)
                 continue;
             }
             azure_kusto_file->fsf = fsf;
-            azure_kusto_file->first_log_time = time(NULL);
             azure_kusto_file->create_time = time(NULL);
 
             /* Use fstore opaque 'data' reference to keep our context */

@@ -701,8 +701,7 @@ static int azure_kusto_format(struct flb_azure_kusto *ctx, const char *tag, int 
 
 static int buffer_chunk(void *out_context, struct azure_kusto_file *upload_file,
                         flb_sds_t chunk, int chunk_size,
-                        const char *tag, int tag_len,
-                        time_t file_first_log_time)
+                        const char *tag, int tag_len)
 {
     int ret;
     struct flb_azure_kusto *ctx = out_context;
@@ -710,7 +709,7 @@ static int buffer_chunk(void *out_context, struct azure_kusto_file *upload_file,
     flb_plg_trace(ctx->ins, "Buffering chunk %d", chunk_size);
 
     ret = azure_kusto_store_buffer_put(ctx, upload_file, tag,
-                              tag_len, chunk, (size_t) chunk_size, file_first_log_time);
+                              tag_len, chunk, (size_t) chunk_size);
     if (ret < 0) {
         flb_plg_warn(ctx->ins, "Could not buffer chunk. ");
         return -1;
@@ -771,9 +770,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
     struct flb_azure_kusto *ctx = out_context;
     int is_compressed = FLB_FALSE;
     struct azure_kusto_file *upload_file = NULL;
-    struct flb_log_event_decoder log_decoder;
-    struct flb_log_event log_event;
-    time_t file_first_log_time = 0;
     int upload_timeout_check = FLB_FALSE;
     int total_file_size_check = FLB_FALSE;
 
@@ -817,41 +813,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                         event_chunk->tag,
                                         event_chunk->size);
 
-        if (upload_file == NULL) {
-            flb_plg_trace(ctx->ins, "no matching file found for event tag, creating new file");
-            ret = flb_log_event_decoder_init(&log_decoder,
-                                             (char *) event_chunk->data,
-                                             event_chunk->size);
-
-            if (ret != FLB_EVENT_DECODER_SUCCESS) {
-                flb_plg_error(ctx->ins,
-                              "Log event decoder initialization error : %d", ret);
-
-                flb_sds_destroy(json);
-
-                FLB_OUTPUT_RETURN(FLB_ERROR);
-            }
-
-            while ((ret = flb_log_event_decoder_next(
-                    &log_decoder,
-                    &log_event)) == FLB_EVENT_DECODER_SUCCESS) {
-                if (log_event.timestamp.tm.tv_sec != 0) {
-                    file_first_log_time = log_event.timestamp.tm.tv_sec;
-                    break;
-                }
-            }
-
-            flb_log_event_decoder_destroy(&log_decoder);
-        }
-        else {
-            /* Get file_first_log_time from upload_file */
-            file_first_log_time = upload_file->first_log_time;
-        }
-
-        if (file_first_log_time == 0) {
-            file_first_log_time = time(NULL);
-        }
-
         /* Discard upload_file if it has failed to upload MAX_UPLOAD_ERRORS times */
         if (upload_file != NULL && upload_file->failures >= MAX_UPLOAD_ERRORS) {
             flb_plg_warn(ctx->ins, "File with tag %s failed to send %d times, will not "
@@ -889,6 +850,8 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             // Add a comma to the end
             json = flb_sds_cat(json, ",", 1);
             json_size = flb_sds_len(json);
+        }else{
+            flb_plg_warn(ctx->ins, "formatted json is invalid or empty in json chunk %s", event_chunk->tag);
         }
 
         if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
@@ -934,8 +897,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         // Buffer current chunk in filesystem and wait for next chunk from engine
         ret = buffer_chunk(ctx, upload_file, json, json_size,
-                           event_chunk->tag, flb_sds_len(event_chunk->tag),
-                           file_first_log_time);
+                           event_chunk->tag, flb_sds_len(event_chunk->tag));
 
         if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
             flb_plg_error(ctx->ins, "error unlocking mutex");
