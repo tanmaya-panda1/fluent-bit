@@ -436,10 +436,14 @@ int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kust
     struct flb_fstore_file *fsf;
 
     fsf = azure_kusto_file->fsf;
-    ctx->current_buffer_size -= azure_kusto_file->size;
+    if (fsf != NULL) {
+        ctx->current_buffer_size -= azure_kusto_file->size;
 
-    /* permanent deletion */
-    flb_fstore_file_delete(ctx->fs, fsf);
+        /* permanent deletion */
+        flb_fstore_file_delete(ctx->fs, fsf);
+    }else {
+        flb_plg_warn(ctx->ins, "The file might have been already deleted by another coroutine");
+    }
     flb_free(azure_kusto_file);
 
     return 0;

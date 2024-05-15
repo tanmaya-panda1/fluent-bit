@@ -851,7 +851,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             json = flb_sds_cat(json, ",", 1);
             json_size = flb_sds_len(json);
         }else{
-            flb_plg_warn(ctx->ins, "formatted json is invalid or empty in json chunk %s", event_chunk->tag);
+            flb_plg_warn(ctx->ins, "data from event chunk is not an json array or empty in json chunk %s", event_chunk->tag);
         }
 
         if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
@@ -873,9 +873,17 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                       event_chunk->tag,
                                       flb_sds_len(event_chunk->tag));
             if (ret == 0){
+                if (pthread_mutex_lock(&ctx->buffer_mutex)) {
+                    flb_plg_error(ctx->ins, "error locking mutex");
+                    FLB_OUTPUT_RETURN(FLB_RETRY);
+                }
                 ret = azure_kusto_store_file_delete(ctx, upload_file);
+                if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
+                    flb_plg_error(ctx->ins, "error unlocking mutex");
+                    FLB_OUTPUT_RETURN(FLB_RETRY);
+                }
                 if (ret != 0){
-                    flb_plg_error(ctx->ins, "file is ingested but unable to delete it ");
+                    flb_plg_error(ctx->ins, "file is ingested but unable to delete it %s with size %zu", upload_file->fsf->name, upload_file->size);
                     flb_sds_destroy(json);
                     FLB_OUTPUT_RETURN(FLB_ERROR);
                 } else{
@@ -895,7 +903,12 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
 
-        // Buffer current chunk in filesystem and wait for next chunk from engine
+        /* Get a file candidate matching the given 'tag' */
+        upload_file = azure_kusto_store_file_get(ctx,
+                                                 event_chunk->tag,
+                                                 event_chunk->size);
+
+        /* Buffer current chunk in filesystem and wait for next chunk from engine */
         ret = buffer_chunk(ctx, upload_file, json, json_size,
                            event_chunk->tag, flb_sds_len(event_chunk->tag));
 
