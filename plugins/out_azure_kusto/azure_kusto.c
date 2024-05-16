@@ -891,7 +891,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             size_t buffer_size = 0;
             ret = azure_kusto_store_file_upload_read(ctx, upload_file->fsf, &buffered_data, &buffer_size);
             if (ret < 0) {
-                flb_plg_error(ctx->ins, "Could not read locally buffered data %s", upload_file->file_path);
+                flb_plg_error(ctx->ins, "Could not read locally buffered data %s", upload_file->fsf->name);
                 cJSON_Delete(root);
                 flb_sds_destroy(json);
                 FLB_OUTPUT_RETURN(FLB_RETRY);

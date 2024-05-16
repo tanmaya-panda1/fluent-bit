@@ -121,14 +121,13 @@ int flb_fstore_file_exists(struct flb_fstore *fs, flb_sds_t name)
     return FLB_FALSE;
 }
 
-int flb_fstore_file_content_replace(struct flb_azure_kusto *ctx,struct flb_fstore *fs,
-                                    struct flb_fstore_file *fsf,
+int flb_fstore_file_content_replace(struct flb_azure_kusto *ctx,struct azure_kusto_file *azure_kusto_file,
                                     flb_sds_t data, size_t bytes) {
 
     int fd, ret;
 
     // Open the file and get the file descriptor
-    fd = open(fs->root_path, O_WRONLY);
+    fd = open(azure_kusto_file->file_path, O_WRONLY);
     if (fd == -1) {
         flb_plg_error(ctx->ins, "Error opening file: %s", strerror(errno));
         return -1;
@@ -234,7 +233,7 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
 
     /* Append data to the target file */
     //ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
-    ret = flb_fstore_file_content_replace(ctx,ctx->fs, azure_kusto_file->fsf, data, bytes);
+    ret = flb_fstore_file_content_replace(ctx, azure_kusto_file, data, bytes);
     if (ret != 0) {
         flb_plg_error(ctx->ins, "error writing data to local azure_kusto file");
         return -1;
