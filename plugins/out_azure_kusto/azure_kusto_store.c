@@ -193,7 +193,6 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
     flb_sds_t name;
     struct flb_fstore_file *fsf;
     size_t space_remaining;
-    int file_created = 0;
 
     if (ctx->store_dir_limit_size > 0 && ctx->current_buffer_size + bytes >= ctx->store_dir_limit_size) {
         flb_plg_error(ctx->ins, "Buffer is full: current_buffer_size=%zu, new_data=%zu, store_dir_limit_size=%zu bytes",
@@ -243,19 +242,13 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
 
         /* Use fstore opaque 'data' reference to keep our context */
         fsf->data = azure_kusto_file;
-        file_created = 1;
     }
     else {
         fsf = azure_kusto_file->fsf;
     }
 
     /* Append data to the target file */
-    //ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
-    //if(file_created){
-        ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
-    //}else{
-    //    ret = flb_fstore_file_content_replace(ctx, azure_kusto_file, data, bytes);
-    //}
+    ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
 
     if (ret != 0) {
         flb_plg_error(ctx->ins, "error writing data to local azure_kusto file");

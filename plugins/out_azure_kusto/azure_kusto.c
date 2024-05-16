@@ -440,20 +440,20 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
     }
 
     /* Create buffer */
-    //ret = construct_request_buffer(ctx, new_data, upload_file, &buffer, &buffer_size);
-    //if (ret < 0) {
-    //    flb_plg_error(ctx->ins, "Could not construct request buffer for %s",
-    //                  upload_file->file_path);
-    //    return -1;
-    //}
+    ret = construct_request_buffer(ctx, new_data, upload_file, &buffer, &buffer_size);
+    if (ret < 0) {
+        flb_plg_error(ctx->ins, "Could not construct request buffer for %s",
+                      upload_file->fsf->name);
+        return -1;
+    }
 
-    //payload = flb_sds_create_len(buffer, buffer_size);
-    //flb_free(buffer);
+    payload = flb_sds_create_len(buffer, buffer_size);
+    flb_free(buffer);
 
     payload = new_data;
 
     /* modify the payload to add brackets and remove trailing comma to make a json array ready for ingestion */
-    //add_brackets_sds(&payload);
+    add_brackets_sds(&payload);
 
 
     /* Compress the JSON payload */
@@ -864,7 +864,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             total_file_size_check = FLB_TRUE;
         }
 
-        /*if (json_size >= 2 && json[0] == '[' && json[json_size - 1] == ']') {
+        if (json_size >= 2 && json[0] == '[' && json[json_size - 1] == ']') {
             // Reduce 'bytes' by 1 to remove the ']' at the end
             json_size--;
 
@@ -880,11 +880,11 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             json_size = flb_sds_len(json);
         }else{
             flb_plg_warn(ctx->ins, "data from event chunk is not an json array or empty in json chunk %s", event_chunk->tag);
-        }*/
+        }
 
 
         // If upload_file exists, read the existing JSON array from it
-        cJSON *jsonArray = NULL;
+        /*cJSON *jsonArray = NULL;
         if (upload_file != NULL) {
             char *buffered_data = NULL;
             size_t buffer_size = 0;
@@ -917,7 +917,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         flb_sds_destroy(json);
         json = flb_sds_create(jsonString);
         json_size = flb_sds_len(json);
-        free(jsonString);
+        free(jsonString);*/
 
 
         if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
@@ -970,9 +970,9 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         }
 
         /* Get a file candidate matching the given 'tag' */
-        //upload_file = azure_kusto_store_file_get(ctx,
-        //                                         event_chunk->tag,
-        //                                         event_chunk->size);
+        upload_file = azure_kusto_store_file_get(ctx,
+                                                 event_chunk->tag,
+                                                 event_chunk->size);
 
         /* Buffer current chunk in filesystem and wait for next chunk from engine */
         ret = buffer_chunk(ctx, upload_file, json, json_size,
