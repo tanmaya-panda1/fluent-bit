@@ -809,6 +809,13 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         flb_plg_debug(ctx->ins,"event tag is  ::: %s", event_chunk->tag);
 
+        if (pthread_mutex_lock(&ctx->buffer_mutex)) {
+            flb_plg_error(ctx->ins, "error locking mutex");
+            cJSON_Delete(root);
+            flb_sds_destroy(json);
+            FLB_OUTPUT_RETURN(FLB_RETRY);
+        }
+
         /* Reformat msgpack to JSON payload */
         ret = azure_kusto_format(ctx, event_chunk->tag, tag_len, event_chunk->data,
                                  event_chunk->size, (void **)&json, &json_size);
@@ -829,13 +836,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
 
-
-        if (pthread_mutex_lock(&ctx->buffer_mutex)) {
-            flb_plg_error(ctx->ins, "error locking mutex");
-            cJSON_Delete(root);
-            flb_sds_destroy(json);
-            FLB_OUTPUT_RETURN(FLB_RETRY);
-        }
 
         /* Get a file candidate matching the given 'tag' */
         upload_file = azure_kusto_store_file_get(ctx,
