@@ -121,6 +121,54 @@ int flb_fstore_file_exists(struct flb_fstore *fs, flb_sds_t name)
     return FLB_FALSE;
 }
 
+int flb_fstore_file_content_replace(struct flb_azure_kusto *ctx,struct flb_fstore *fs,
+                                    struct flb_fstore_file *fsf,
+                                    flb_sds_t data, size_t bytes) {
+
+    int fd, ret;
+
+    // Open the file and get the file descriptor
+    fd = open(fs->root_path, O_WRONLY);
+    if (fd == -1) {
+        flb_plg_error(ctx->ins, "Error opening file: %s", strerror(errno));
+        return -1;
+    }
+
+    // Acquire an exclusive lock using flock
+    ret = flock(fd, LOCK_EX);
+    if (ret == -1) {
+        flb_plg_error(ctx->ins, "Error acquiring lock: %s", strerror(errno));
+        close(fd);
+        return -1;
+    }
+
+    // Truncate the existing file content
+    ret = ftruncate(fd, 0);
+    if (ret == -1) {
+        flb_plg_error(ctx->ins, "Error truncating file: %s", strerror(errno));
+        flock(fd, LOCK_UN);
+        close(fd);
+        return -1;
+    }
+
+    // Write the new data to the file
+    ret = write(fd, data, bytes);
+    if (ret == -1) {
+        flb_plg_error(ctx->ins, "Error writing data to file: %s", strerror(errno));
+        flock(fd, LOCK_UN);
+        close(fd);
+        return -1;
+    }
+
+    // Release the lock
+    flock(fd, LOCK_UN);
+
+    // Close the file
+    close(fd);
+
+    return 0;
+}
+
 /* Append data to a new or existing fstore file */
 int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file,
                         const char *tag, int tag_len,
@@ -184,39 +232,19 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         fsf = azure_kusto_file->fsf;
     }
 
-    /*if (bytes >= 2 && data[0] == '[' && data[bytes - 1] == ']') {
-        flb_plg_debug(ctx->ins, "[azure_kusto] before removing [] %zu",bytes);
-        // Reduce 'bytes' by 1 to remove the ']' at the end
-        bytes--;
-
-        // Perform the shift to remove the '[' at the beginning
-        memmove(data, data + 1, bytes - 2);
-        bytes--;  // Adjust bytes to account for the removal of '['
-
-        // Set the new length of the data string
-        flb_sds_len_set(data, bytes);
-
-        flb_plg_debug(ctx->ins, "[azure_kusto] after removing [] %zu", bytes);
-        //while (bytes > 0 && (data[bytes - 1] == ' ' || data[bytes - 1] == '\n' || data[bytes - 1] == '\t' || data[bytes - 1] == '\0')) {
-        //    bytes--;
-        //    flb_sds_len_set(data, bytes);
-        //}
-
-        flb_plg_debug(ctx->ins, "[azure_kusto] after removing [] %zu",bytes);
-        // Add a comma to the end
-        data = flb_sds_cat(data, ",", 1);
-        bytes = flb_sds_len(data);
-    }*/
-
     /* Append data to the target file */
-    ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
+    //ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
+    ret = flb_fstore_file_content_replace(ctx,ctx->fs, azure_kusto_file->fsf, data, bytes);
     if (ret != 0) {
         flb_plg_error(ctx->ins, "error writing data to local azure_kusto file");
         return -1;
     }
 
-    azure_kusto_file->size += bytes;
-    ctx->current_buffer_size += bytes;
+    //azure_kusto_file->size += bytes;
+    //ctx->current_buffer_size += bytes;
+
+    azure_kusto_file->size = bytes;
+    ctx->current_buffer_size = bytes;
 
     flb_plg_debug(ctx->ins, "[azure_kusto] new file size: %zu", azure_kusto_file->size);
     flb_plg_debug(ctx->ins, "[azure_kusto] current_buffer_size: %zu", ctx->current_buffer_size);
