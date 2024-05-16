@@ -251,22 +251,22 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
 
     /* Append data to the target file */
     //ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
-    if(file_created){
+    //if(file_created){
         ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
-    }else{
-        ret = flb_fstore_file_content_replace(ctx, azure_kusto_file, data, bytes);
-    }
+    //}else{
+    //    ret = flb_fstore_file_content_replace(ctx, azure_kusto_file, data, bytes);
+    //}
 
     if (ret != 0) {
         flb_plg_error(ctx->ins, "error writing data to local azure_kusto file");
         return -1;
     }
 
-    //azure_kusto_file->size += bytes;
-    //ctx->current_buffer_size += bytes;
+    azure_kusto_file->size += bytes;
+    ctx->current_buffer_size += bytes;
 
-    azure_kusto_file->size = bytes;
-    ctx->current_buffer_size = bytes;
+    //azure_kusto_file->size = bytes;
+    //ctx->current_buffer_size = bytes;
 
     flb_plg_debug(ctx->ins, "[azure_kusto] new file size: %zu", azure_kusto_file->size);
     flb_plg_debug(ctx->ins, "[azure_kusto] current_buffer_size: %zu", ctx->current_buffer_size);
