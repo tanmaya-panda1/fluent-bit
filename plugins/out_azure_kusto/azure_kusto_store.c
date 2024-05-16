@@ -126,8 +126,18 @@ int flb_fstore_file_content_replace(struct flb_azure_kusto *ctx,struct azure_kus
 
     int fd, ret;
 
+    flb_sds_t path;
+
+    path = flb_sds_create_size(flb_sds_len(flb_sds_create(ctx->fs->root_path)) + flb_sds_len(azure_kusto_file->fsf->name) + 2);
+    if (path == NULL) {
+        flb_plg_error(ctx->ins, "failed to allocate memory for path");
+        return -1;
+    }
+
+    flb_sds_printf(&path, "%s/%s",flb_sds_create(ctx->fs->root_path), azure_kusto_file->fsf->name);
+
     // Open the file and get the file descriptor
-    fd = open(azure_kusto_file->file_path, O_WRONLY);
+    fd = open(path, O_WRONLY);
     if (fd == -1) {
         flb_plg_error(ctx->ins, "Error opening file: %s", strerror(errno));
         return -1;
@@ -158,6 +168,8 @@ int flb_fstore_file_content_replace(struct flb_azure_kusto *ctx,struct azure_kus
         close(fd);
         return -1;
     }
+
+    flb_sds_destroy(path);
 
     // Release the lock
     flock(fd, LOCK_UN);
