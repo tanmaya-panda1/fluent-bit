@@ -811,7 +811,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         if (pthread_mutex_lock(&ctx->buffer_mutex)) {
             flb_plg_error(ctx->ins, "error locking mutex");
-            cJSON_Delete(root);
             flb_sds_destroy(json);
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
