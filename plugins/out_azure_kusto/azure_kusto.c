@@ -450,8 +450,6 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
     payload = flb_sds_create_len(buffer, buffer_size);
     flb_free(buffer);
 
-    payload = new_data;
-
     /* modify the payload to add brackets and remove trailing comma to make a json array ready for ingestion */
     add_brackets_sds(&payload);
 
@@ -823,7 +821,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         if (pthread_mutex_lock(&ctx->buffer_mutex)) {
             flb_plg_error(ctx->ins, "error locking mutex");
-            flb_sds_destroy(json);
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
 
@@ -835,29 +832,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
 
-        char *json_cstr = flb_sds_to_cstr(json);
-        if (json_cstr == NULL) {
-            flb_plg_error(ctx->ins, "Memory allocation error");
-            flb_sds_destroy(json);
-            FLB_OUTPUT_RETURN(FLB_ERROR);
-        }
-
-        /* Use cJSON_ParseWithLength to parse the JSON string */
-        size_t json_len = flb_sds_len(json);
-        /* Check if the JSON data is an array and valid json*/
-        cJSON *root = cJSON_ParseWithLength(json_cstr,json_len);
-        if (root == NULL) {
-            flb_plg_error(ctx->ins, "JSON parse error occurred for tag %s", event_chunk->tag);
-            const char *error_ptr = cJSON_GetErrorPtr();
-            if (error_ptr != NULL) {
-                flb_plg_error(ctx->ins, "JSON parse error before: %s", error_ptr);
-            }
-            flb_sds_destroy(json);
-            flb_free(json_cstr);
-            FLB_OUTPUT_RETURN(FLB_ERROR);
-        }
-
-        flb_free(json_cstr);
         /* Get a file candidate matching the given 'tag' */
         upload_file = azure_kusto_store_file_get(ctx,
                                         event_chunk->tag,
@@ -961,7 +935,15 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                       event_chunk->tag,
                                       flb_sds_len(event_chunk->tag));
             if (ret == 0){
+                if (pthread_mutex_lock(&ctx->buffer_mutex)) {
+                    flb_plg_error(ctx->ins, "error locking mutex");
+                    FLB_OUTPUT_RETURN(FLB_RETRY);
+                }
                 ret = azure_kusto_store_file_delete(ctx, upload_file);
+                if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
+                    flb_plg_error(ctx->ins, "error unlocking mutex");
+                    FLB_OUTPUT_RETURN(FLB_RETRY);
+                }
                 if (ret != 0){
                     flb_plg_error(ctx->ins, "file is ingested but unable to delete it %s with size %zu", upload_file->fsf->name, upload_file->size);
                     flb_sds_destroy(json);
@@ -976,39 +958,36 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                 flb_sds_destroy(json);
                 FLB_OUTPUT_RETURN(FLB_RETRY);
             }
-            if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
-                flb_plg_error(ctx->ins, "error unlocking mutex");
-                FLB_OUTPUT_RETURN(FLB_RETRY);
-            }
-        }else{
-            if (pthread_mutex_lock(&ctx->buffer_mutex)) {
-                flb_plg_error(ctx->ins, "error locking mutex");
-                FLB_OUTPUT_RETURN(FLB_RETRY);
-            }
+        }
 
-            /* Get a file candidate matching the given 'tag' */
-            upload_file = azure_kusto_store_file_get(ctx,
-                                                     event_chunk->tag,
-                                                     event_chunk->size);
+        if (pthread_mutex_lock(&ctx->buffer_mutex)) {
+            flb_plg_error(ctx->ins, "error locking mutex");
+            FLB_OUTPUT_RETURN(FLB_RETRY);
+        }
 
-            /* Buffer current chunk in filesystem and wait for next chunk from engine */
-            ret = buffer_chunk(ctx, upload_file, json, json_size,
-                               event_chunk->tag, flb_sds_len(event_chunk->tag));
+        /* Get a file candidate matching the given 'tag' */
+        upload_file = azure_kusto_store_file_get(ctx,
+                                                 event_chunk->tag,
+                                                 event_chunk->size);
 
-            if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
-                flb_plg_error(ctx->ins, "error unlocking mutex");
-                FLB_OUTPUT_RETURN(FLB_RETRY);
-            }
+        /* Buffer current chunk in filesystem and wait for next chunk from engine */
+        ret = buffer_chunk(ctx, upload_file, json, json_size,
+                           event_chunk->tag, flb_sds_len(event_chunk->tag));
 
-            if (ret == 0) {
-                flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
-                flb_sds_destroy(json);
-                FLB_OUTPUT_RETURN(FLB_OK);
-            } else {
-                flb_plg_error(ctx->ins, "failed to buffer chunk %s", event_chunk->tag);
-                flb_sds_destroy(json);
-                FLB_OUTPUT_RETURN(FLB_RETRY);
-            }
+        if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
+            flb_plg_error(ctx->ins, "error unlocking mutex");
+            FLB_OUTPUT_RETURN(FLB_RETRY);
+        }
+
+
+        if (ret == 0) {
+            flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
+            flb_sds_destroy(json);
+            FLB_OUTPUT_RETURN(FLB_OK);
+        } else {
+            flb_plg_error(ctx->ins, "failed to buffer chunk %s", event_chunk->tag);
+            flb_sds_destroy(json);
+            FLB_OUTPUT_RETURN(FLB_RETRY);
         }
 
     } else {
