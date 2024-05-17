@@ -832,6 +832,30 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
 
+        char *json_cstr = flb_sds_to_cstr(json);
+        if (json_cstr == NULL) {
+            flb_plg_error(ctx->ins, "Memory allocation error");
+            flb_sds_destroy(json);
+            FLB_OUTPUT_RETURN(FLB_ERROR);
+        }
+
+        /* Use cJSON_ParseWithLength to parse the JSON string */
+        size_t json_len = flb_sds_len(json);
+        /* Check if the JSON data is an array and valid json*/
+        cJSON *root = cJSON_ParseWithLength(json_cstr,json_len);
+        if (root == NULL) {
+            flb_plg_error(ctx->ins, "JSON parse error occurred for tag %s", event_chunk->tag);
+            const char *error_ptr = cJSON_GetErrorPtr();
+            if (error_ptr != NULL) {
+                flb_plg_error(ctx->ins, "JSON parse error before: %s", error_ptr);
+            }
+            flb_sds_destroy(json);
+            flb_free(json_cstr);
+            FLB_OUTPUT_RETURN(FLB_ERROR);
+        }
+
+        flb_free(json_cstr);
+
         /* Get a file candidate matching the given 'tag' */
         upload_file = azure_kusto_store_file_get(ctx,
                                         event_chunk->tag,
