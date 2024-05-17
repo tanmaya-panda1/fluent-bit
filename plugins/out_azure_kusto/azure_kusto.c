@@ -268,7 +268,7 @@ static int construct_request_buffer(struct flb_azure_kusto *ctx, flb_sds_t new_d
         ret = azure_kusto_store_file_upload_read(ctx, upload_file->fsf, &buffered_data, &buffer_size);
         if (ret < 0) {
             flb_plg_error(ctx->ins, "Could not read locally buffered data %s",
-                          upload_file->file_path);
+                          upload_file->fsf->name);
             return -1;
         }
 
@@ -840,7 +840,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         }
 
         /* Use cJSON_ParseWithLength to parse the JSON string */
-        size_t json_len = flb_sds_len(json);
+        size_t json_len = strlen(json);
         /* Check if the JSON data is an array and valid json*/
         cJSON *root = cJSON_ParseWithLength(json_cstr,json_len);
         if (root == NULL) {
@@ -851,10 +851,12 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             }
             flb_sds_destroy(json);
             flb_free(json_cstr);
+            cJSON_Delete(root);
             FLB_OUTPUT_RETURN(FLB_ERROR);
         }
 
         flb_free(json_cstr);
+        cJSON_Delete(root);
 
         /* Get a file candidate matching the given 'tag' */
         upload_file = azure_kusto_store_file_get(ctx,
