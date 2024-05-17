@@ -713,7 +713,7 @@ static int azure_kusto_format(struct flb_azure_kusto *ctx, const char *tag, int 
 
 static int buffer_chunk(void *out_context, struct azure_kusto_file *upload_file,
                         flb_sds_t chunk, int chunk_size,
-                        const char *tag, int tag_len)
+                        flb_sds_t tag, size_t tag_len)
 {
     int ret;
     struct flb_azure_kusto *ctx = out_context;
@@ -721,7 +721,7 @@ static int buffer_chunk(void *out_context, struct azure_kusto_file *upload_file,
     flb_plg_trace(ctx->ins, "Buffering chunk %d", chunk_size);
 
     ret = azure_kusto_store_buffer_put(ctx, upload_file, tag,
-                              tag_len, chunk, (size_t) chunk_size);
+                              tag_len, chunk, chunk_size);
     if (ret < 0) {
         flb_plg_warn(ctx->ins, "Could not buffer chunk. ");
         return -1;
@@ -832,17 +832,17 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
 
-        char *json_cstr = flb_sds_to_cstr(json);
+        /*char *json_cstr = flb_sds_to_cstr(json);
         if (json_cstr == NULL) {
             flb_plg_error(ctx->ins, "Memory allocation error");
             flb_sds_destroy(json);
             FLB_OUTPUT_RETURN(FLB_ERROR);
-        }
+        }*/
 
         /* Use cJSON_ParseWithLength to parse the JSON string */
-        size_t json_len = strlen(json);
+        size_t json_len = flb_sds_len(json);
         /* Check if the JSON data is an array and valid json*/
-        cJSON *root = cJSON_ParseWithLength(json_cstr,json_len);
+        cJSON *root = cJSON_ParseWithLength((char*)json,json_size);
         if (root == NULL) {
             flb_plg_error(ctx->ins, "JSON parse error occurred for tag %s", event_chunk->tag);
             const char *error_ptr = cJSON_GetErrorPtr();
@@ -850,12 +850,12 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                 flb_plg_error(ctx->ins, "JSON parse error before: %s", error_ptr);
             }
             flb_sds_destroy(json);
-            flb_free(json_cstr);
+            //flb_free(json_cstr);
             cJSON_Delete(root);
             FLB_OUTPUT_RETURN(FLB_ERROR);
         }
 
-        flb_free(json_cstr);
+        //flb_free(json_cstr);
         cJSON_Delete(root);
 
         /* Get a file candidate matching the given 'tag' */

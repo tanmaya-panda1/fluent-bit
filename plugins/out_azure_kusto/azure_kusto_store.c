@@ -190,14 +190,13 @@ static char* construct_file_path(const char *root_path, const char *file_name) {
 
 /* Append data to a new or existing fstore file */
 int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file,
-                        const char *tag, int tag_len,
+                                 flb_sds_t tag, size_t tag_len,
                         flb_sds_t data, size_t bytes)
 {
     int ret;
     flb_sds_t name;
     struct flb_fstore_file *fsf;
     size_t space_remaining;
-    int fd;
 
     if (ctx->store_dir_limit_size > 0 && ctx->current_buffer_size + bytes >= ctx->store_dir_limit_size) {
         flb_plg_error(ctx->ins, "Buffer is full: current_buffer_size=%zu, new_data=%zu, store_dir_limit_size=%zu bytes",
@@ -209,7 +208,8 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
 
     /* If no target file was found, create a new one */
     if (!azure_kusto_file || azure_kusto_file == NULL) {
-        name = flb_sds_create_len(tag, tag_len);
+        //name = flb_sds_create_len(tag, tag_len);
+        name = tag;
         if (!name) {
             flb_plg_error(ctx->ins, "could not generate chunk file name");
             return -1;
@@ -218,7 +218,7 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         flb_plg_debug(ctx->ins, "[azure_kusto] new buffer file: %s", name);
 
         /* Create the file */
-        fsf = flb_fstore_file_create(ctx->fs, ctx->stream_active, name, bytes);
+        fsf = flb_fstore_file_create(ctx->fs, ctx->stream_active, (char *) name, bytes);
         if (!fsf) {
             flb_plg_error(ctx->ins, "could not create the file '%s' in the store",
                           name);
@@ -245,7 +245,7 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         azure_kusto_file->fsf = fsf;
         azure_kusto_file->create_time = time(NULL);
 
-        size_t len = flb_sds_len(fsf->name);
+        /*size_t len = flb_sds_len(fsf->name);
         char *cstr = (char *)malloc(len + 1);  // Allocate memory for the string plus null terminator
         if (cstr == NULL) {
             return NULL;  // Handle memory allocation failure
@@ -266,7 +266,7 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
             flb_free(azure_kusto_file);
             flb_fstore_file_delete(ctx->fs, fsf);
             return -1;
-        }
+        }*/
 
         /* Use fstore opaque 'data' reference to keep our context */
         fsf->data = azure_kusto_file;
@@ -276,23 +276,23 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
     }
 
     /* Open the file descriptor using the file_path */
-    fd = open(azure_kusto_file->file_path, O_WRONLY);
+    /*fd = open(azure_kusto_file->file_path, O_WRONLY);
     if (fd == -1) {
         flb_plg_error(ctx->ins, "could not open file '%s' for locking: %s", azure_kusto_file->file_path, strerror(errno));
         return -1;
     }
 
-    /* Acquire the lock */
+    *//* Acquire the lock *//*
     if (flock(fd, LOCK_EX) == -1) {
         flb_plg_error(ctx->ins, "could not lock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
         close(fd);
         return -1;
     }
 
-    /* Append data to the target file */
+    *//* Append data to the target file *//*
     ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
 
-    /* Release the lock */
+    *//* Release the lock *//*
     if (flock(fd, LOCK_UN) == -1) {
         flb_plg_error(ctx->ins, "could not unlock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
     }
@@ -301,14 +301,14 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
     if (ret != 0) {
         flb_plg_error(ctx->ins, "error writing data to local azure_kusto file");
         return -1;
-    }
+    }*/
     /* Append data to the target file */
-    //ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
+    ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
 
-    /*if (ret != 0) {
+    if (ret != 0) {
         flb_plg_error(ctx->ins, "error writing data to local azure_kusto file");
         return -1;
-    }*/
+    }
 
     azure_kusto_file->size += bytes;
     ctx->current_buffer_size += bytes;

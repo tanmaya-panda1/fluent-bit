@@ -35,8 +35,8 @@ struct azure_kusto_file {
 };
 
 int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file,
-                        const char *tag, int tag_len,
-                        char *data, size_t bytes);
+                                 flb_sds_t tag, size_t tag_len,
+                                 flb_sds_t data, size_t bytes);
 
 int azure_kusto_store_init(struct flb_azure_kusto *ctx);
 int azure_kusto_store_exit(struct flb_azure_kusto *ctx);
