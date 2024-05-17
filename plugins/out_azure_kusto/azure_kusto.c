@@ -980,36 +980,35 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                 flb_plg_error(ctx->ins, "error unlocking mutex");
                 FLB_OUTPUT_RETURN(FLB_RETRY);
             }
-        }
+        }else{
+            if (pthread_mutex_lock(&ctx->buffer_mutex)) {
+                flb_plg_error(ctx->ins, "error locking mutex");
+                FLB_OUTPUT_RETURN(FLB_RETRY);
+            }
 
-        if (pthread_mutex_lock(&ctx->buffer_mutex)) {
-            flb_plg_error(ctx->ins, "error locking mutex");
-            FLB_OUTPUT_RETURN(FLB_RETRY);
-        }
+            /* Get a file candidate matching the given 'tag' */
+            upload_file = azure_kusto_store_file_get(ctx,
+                                                     event_chunk->tag,
+                                                     event_chunk->size);
 
-        /* Get a file candidate matching the given 'tag' */
-        upload_file = azure_kusto_store_file_get(ctx,
-                                                 event_chunk->tag,
-                                                 event_chunk->size);
+            /* Buffer current chunk in filesystem and wait for next chunk from engine */
+            ret = buffer_chunk(ctx, upload_file, json, json_size,
+                               event_chunk->tag, flb_sds_len(event_chunk->tag));
 
-        /* Buffer current chunk in filesystem and wait for next chunk from engine */
-        ret = buffer_chunk(ctx, upload_file, json, json_size,
-                           event_chunk->tag, flb_sds_len(event_chunk->tag));
+            if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
+                flb_plg_error(ctx->ins, "error unlocking mutex");
+                FLB_OUTPUT_RETURN(FLB_RETRY);
+            }
 
-        if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
-            flb_plg_error(ctx->ins, "error unlocking mutex");
-            FLB_OUTPUT_RETURN(FLB_RETRY);
-        }
-
-
-        if (ret == 0) {
-            flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
-            flb_sds_destroy(json);
-            FLB_OUTPUT_RETURN(FLB_OK);
-        } else {
-            flb_plg_error(ctx->ins, "failed to buffer chunk %s", event_chunk->tag);
-            flb_sds_destroy(json);
-            FLB_OUTPUT_RETURN(FLB_RETRY);
+            if (ret == 0) {
+                flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
+                flb_sds_destroy(json);
+                FLB_OUTPUT_RETURN(FLB_OK);
+            } else {
+                flb_plg_error(ctx->ins, "failed to buffer chunk %s", event_chunk->tag);
+                flb_sds_destroy(json);
+                FLB_OUTPUT_RETURN(FLB_RETRY);
+            }
         }
 
     } else {
