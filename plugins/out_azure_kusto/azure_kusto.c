@@ -954,15 +954,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                       event_chunk->tag,
                                       flb_sds_len(event_chunk->tag));
             if (ret == 0){
-                if (pthread_mutex_lock(&ctx->buffer_mutex)) {
-                    flb_plg_error(ctx->ins, "error locking mutex");
-                    FLB_OUTPUT_RETURN(FLB_RETRY);
-                }
                 ret = azure_kusto_store_file_delete(ctx, upload_file);
-                if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
-                    flb_plg_error(ctx->ins, "error unlocking mutex");
-                    FLB_OUTPUT_RETURN(FLB_RETRY);
-                }
                 if (ret != 0){
                     flb_plg_error(ctx->ins, "file is ingested but unable to delete it %s with size %zu", upload_file->fsf->name, upload_file->size);
                     flb_sds_destroy(json);
@@ -975,6 +967,10 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             }else{
                 flb_plg_error(ctx->ins, "unable to ingest file ");
                 flb_sds_destroy(json);
+                FLB_OUTPUT_RETURN(FLB_RETRY);
+            }
+            if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
+                flb_plg_error(ctx->ins, "error unlocking mutex");
                 FLB_OUTPUT_RETURN(FLB_RETRY);
             }
         }
