@@ -772,6 +772,18 @@ static void remove_brackets_sds(flb_sds_t *data) {
     }
 }
 
+// Function to convert flb_sds_t to char*
+char* flb_sds_to_cstr(flb_sds_t sds) {
+    size_t len = flb_sds_len(sds);
+    char *cstr = (char *)malloc(len + 1);  // Allocate memory for the string plus null terminator
+    if (cstr == NULL) {
+        return NULL;  // Handle memory allocation failure
+    }
+    memcpy(cstr, sds, len);  // Copy the content
+    cstr[len] = '\0';  // Null-terminate the string
+    return cstr;
+}
+
 static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                  struct flb_output_flush *out_flush,
                                  struct flb_input_instance *i_ins, void *out_context,
@@ -823,8 +835,10 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
 
+        char *json_cstr = flb_sds_to_cstr(json);
+
         /* Check if the JSON data is an array and valid json*/
-        cJSON *root = cJSON_Parse(json);
+        cJSON *root = cJSON_Parse(json_cstr);
         if (root == NULL) {
             flb_plg_error(ctx->ins, "JSON parse error occurred for tag %s", event_chunk->tag);
             const char *error_ptr = cJSON_GetErrorPtr();
@@ -832,10 +846,11 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                 flb_plg_error(ctx->ins, "JSON parse error before: %s", error_ptr);
             }
             flb_sds_destroy(json);
-            FLB_OUTPUT_RETURN(FLB_RETRY);
+            flb_free(json_cstr);
+            FLB_OUTPUT_RETURN(FLB_ERROR);
         }
 
-
+        flb_free(json_cstr);
         /* Get a file candidate matching the given 'tag' */
         upload_file = azure_kusto_store_file_get(ctx,
                                         event_chunk->tag,
