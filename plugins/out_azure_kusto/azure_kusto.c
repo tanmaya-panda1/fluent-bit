@@ -770,16 +770,40 @@ static void remove_brackets_sds(flb_sds_t *data) {
     }
 }
 
-// Function to convert flb_sds_t to char*
-char* flb_sds_to_cstr(flb_sds_t sds) {
-    size_t len = flb_sds_len(sds);
-    char *cstr = (char *)malloc(len + 1);  // Allocate memory for the string plus null terminator
-    if (cstr == NULL) {
-        return NULL;  // Handle memory allocation failure
+int lock_and_delete(const char *filePath) {
+    // Open the file
+    int fd = open(filePath, O_RDWR);
+    if (fd == -1) {
+        perror("Failed to open file");
+        return -1;
     }
-    memcpy(cstr, sds, len);  // Copy the content
-    cstr[len] = '\0';  // Null-terminate the string
-    return cstr;
+
+    // Acquire an exclusive lock on the file
+    if (flock(fd, LOCK_EX) == -1) {
+        perror("Failed to lock file");
+        close(fd);
+        return -1;
+    }
+
+    // Perform file deletion
+    if (unlink(filePath) == -1) {
+        perror("Failed to delete file");
+        // Release the lock before returning
+        flock(fd, LOCK_UN);
+        close(fd);
+        return -1;
+    }
+
+    // Release the lock
+    if (flock(fd, LOCK_UN) == -1) {
+        perror("Failed to unlock file");
+        close(fd);
+        return -1;
+    }
+
+    // Close the file descriptor
+    close(fd);
+    return 0;
 }
 
 static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
@@ -832,15 +856,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
 
-        /*char *json_cstr = flb_sds_to_cstr(json);
-        if (json_cstr == NULL) {
-            flb_plg_error(ctx->ins, "Memory allocation error");
-            flb_sds_destroy(json);
-            FLB_OUTPUT_RETURN(FLB_ERROR);
-        }*/
-
-        /* Use cJSON_ParseWithLength to parse the JSON string */
-        size_t json_len = flb_sds_len(json);
         /* Check if the JSON data is an array and valid json*/
         cJSON *root = cJSON_ParseWithLength((char*)json,json_size);
         if (root == NULL) {
@@ -850,12 +865,10 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                 flb_plg_error(ctx->ins, "JSON parse error before: %s", error_ptr);
             }
             flb_sds_destroy(json);
-            //flb_free(json_cstr);
             cJSON_Delete(root);
             FLB_OUTPUT_RETURN(FLB_ERROR);
         }
 
-        //flb_free(json_cstr);
         cJSON_Delete(root);
 
         /* Get a file candidate matching the given 'tag' */
@@ -903,44 +916,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         }else{
             flb_plg_warn(ctx->ins, "data from event chunk is not an json array or empty in json chunk %s", event_chunk->tag);
         }
-
-
-        // If upload_file exists, read the existing JSON array from it
-        /*cJSON *jsonArray = NULL;
-        if (upload_file != NULL) {
-            char *buffered_data = NULL;
-            size_t buffer_size = 0;
-            ret = azure_kusto_store_file_upload_read(ctx, upload_file->fsf, &buffered_data, &buffer_size);
-            if (ret < 0) {
-                flb_plg_error(ctx->ins, "Could not read locally buffered data %s", upload_file->fsf->name);
-                cJSON_Delete(root);
-                flb_sds_destroy(json);
-                FLB_OUTPUT_RETURN(FLB_RETRY);
-            }
-            jsonArray = cJSON_Parse(buffered_data);
-            flb_free(buffered_data);
-            if (jsonArray == NULL) {
-                flb_plg_error(ctx->ins, "Failed to parse existing JSON array");
-                cJSON_Delete(root);
-                flb_sds_destroy(json);
-                FLB_OUTPUT_RETURN(FLB_RETRY);
-            }
-        } else {
-            // Create a new JSON array
-            jsonArray = cJSON_CreateArray();
-        }
-
-        // Add the new JSON data to the array
-        cJSON_AddItemToArray(jsonArray, root);
-
-        // Convert the JSON array back to a string
-        char *jsonString = cJSON_PrintUnformatted(jsonArray);
-        cJSON_Delete(jsonArray);
-        flb_sds_destroy(json);
-        json = flb_sds_create(jsonString);
-        json_size = flb_sds_len(json);
-        free(jsonString);*/
-
 
         if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
             flb_plg_error(ctx->ins, "error unlocking mutex");
@@ -1004,7 +979,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             flb_plg_error(ctx->ins, "error unlocking mutex");
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
-
 
         if (ret == 0) {
             flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);

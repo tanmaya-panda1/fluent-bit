@@ -202,8 +202,6 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         return -1;
     }
 
-    flb_plg_error(ctx->ins, "inside azure_kusto_store_buffer_put function");
-
     /* If no target file was found, create a new one */
     if (!azure_kusto_file || azure_kusto_file == NULL) {
         //name = flb_sds_create_len(tag, tag_len);
@@ -253,32 +251,8 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
 
         flb_plg_debug(ctx->ins, "[azure_kusto] new file path: %s", azure_kusto_file->file_path);
 
-        /*size_t len = flb_sds_len(fsf->name);
-        char *cstr = (char *)malloc(len + 1);  // Allocate memory for the string plus null terminator
-        if (cstr == NULL) {
-            return NULL;  // Handle memory allocation failure
-        }
-        memcpy(cstr, fsf->name, len);  // Copy the content
-        cstr[len] = '\0';  // Null-terminate the string
-
-        size_t path_len = strlen(ctx->fs->root_path) + strlen(cstr) + 2;
-        char *path = malloc(path_len);
-        if (!path) {
-            return NULL;
-        }
-        snprintf(path, path_len, "%s/%s", ctx->fs->root_path, cstr);
-        azure_kusto_file->file_path = path; // Set the file path
-
-        if (!azure_kusto_file->file_path) {
-            flb_plg_error(ctx->ins, "could not construct file path");
-            flb_free(azure_kusto_file);
-            flb_fstore_file_delete(ctx->fs, fsf);
-            return -1;
-        }*/
-
         /* Use fstore opaque 'data' reference to keep our context */
         fsf->data = azure_kusto_file;
-
 
     }
     else {
@@ -312,13 +286,6 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         flb_plg_error(ctx->ins, "error writing data to local azure_kusto file");
         return -1;
     }
-    /* Append data to the target file *//*
-    ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
-
-    if (ret != 0) {
-        flb_plg_error(ctx->ins, "error writing data to local azure_kusto file");
-        return -1;
-    }*/
 
     azure_kusto_file->size += bytes;
     ctx->current_buffer_size += bytes;
@@ -539,13 +506,51 @@ int azure_kusto_store_file_inactive(struct flb_azure_kusto *ctx, struct azure_ku
 int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file)
 {
     struct flb_fstore_file *fsf;
+    int fd;
 
     fsf = azure_kusto_file->fsf;
     if (fsf != NULL) {
         ctx->current_buffer_size -= azure_kusto_file->size;
 
+        // Check if the file exists
+        if (access(azure_kusto_file->file_path, F_OK) == -1) {
+            flb_plg_warn(ctx->ins, "File '%s' does not exist", azure_kusto_file->file_path);
+            flb_sds_destroy(azure_kusto_file->file_path);
+            flb_free(azure_kusto_file);
+            return -1;
+        }
+
+        // Open the file
+        fd = open(azure_kusto_file->file_path, O_RDWR);
+        if (fd == -1) {
+            flb_plg_error(ctx->ins, "Failed to open file '%s': %s", azure_kusto_file->file_path, strerror(errno));
+            flb_sds_destroy(azure_kusto_file->file_path);
+            flb_free(azure_kusto_file);
+            return -1;
+        }
+
+        // Acquire an exclusive lock on the file
+        if (flock(fd, LOCK_EX) == -1) {
+            flb_plg_error(ctx->ins, "Failed to lock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
+            close(fd);
+            flb_sds_destroy(azure_kusto_file->file_path);
+            flb_free(azure_kusto_file);
+            return -1;
+        }
+
         /* permanent deletion */
         flb_fstore_file_delete(ctx->fs, fsf);
+
+        // Release the lock
+        if (flock(fd, LOCK_UN) == -1) {
+            flb_plg_error(ctx->ins, "Failed to unlock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
+            close(fd);
+            flb_sds_destroy(azure_kusto_file->file_path);
+            flb_free(azure_kusto_file);
+            return -1;
+        }
+
+        close(fd);
     }else {
         flb_plg_warn(ctx->ins, "The file might have been already deleted by another coroutine");
     }
