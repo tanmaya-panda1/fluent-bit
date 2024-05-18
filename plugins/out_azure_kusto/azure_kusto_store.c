@@ -184,9 +184,6 @@ int flb_fstore_file_content_replace(struct flb_azure_kusto *ctx,struct azure_kus
     return 0;
 }
 
-static char* construct_file_path(const char *root_path, const char *file_name) {
-
-}
 
 /* Append data to a new or existing fstore file */
 int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file,
@@ -194,6 +191,7 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
                         flb_sds_t data, size_t bytes)
 {
     int ret;
+    int fd;
     flb_sds_t name;
     struct flb_fstore_file *fsf;
     size_t space_remaining;
@@ -245,6 +243,16 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         azure_kusto_file->fsf = fsf;
         azure_kusto_file->create_time = time(NULL);
 
+        flb_sds_t path_sds = flb_sds_create(ctx->stream_active->path);
+        // Append a slash ("/") to the path
+        path_sds = flb_sds_cat(path_sds, "/", 1);
+        // Append the fileName to the path
+        path_sds = flb_sds_cat(path_sds, azure_kusto_file->fsf->name, flb_sds_len(azure_kusto_file->fsf->name));
+
+        azure_kusto_file->file_path = path_sds;
+
+        flb_plg_debug(ctx->ins, "[azure_kusto] new file path: %s", azure_kusto_file->file_path);
+
         /*size_t len = flb_sds_len(fsf->name);
         char *cstr = (char *)malloc(len + 1);  // Allocate memory for the string plus null terminator
         if (cstr == NULL) {
@@ -270,29 +278,31 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
 
         /* Use fstore opaque 'data' reference to keep our context */
         fsf->data = azure_kusto_file;
+
+
     }
     else {
         fsf = azure_kusto_file->fsf;
     }
 
     /* Open the file descriptor using the file_path */
-    /*fd = open(azure_kusto_file->file_path, O_WRONLY);
+    fd = open(azure_kusto_file->file_path, O_WRONLY);
     if (fd == -1) {
         flb_plg_error(ctx->ins, "could not open file '%s' for locking: %s", azure_kusto_file->file_path, strerror(errno));
         return -1;
     }
 
-    *//* Acquire the lock *//*
+    /* Acquire the lock */
     if (flock(fd, LOCK_EX) == -1) {
         flb_plg_error(ctx->ins, "could not lock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
         close(fd);
         return -1;
     }
 
-    *//* Append data to the target file *//*
+    /* Append data to the target file */
     ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
 
-    *//* Release the lock *//*
+    /* Release the lock */
     if (flock(fd, LOCK_UN) == -1) {
         flb_plg_error(ctx->ins, "could not unlock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
     }
@@ -301,14 +311,14 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
     if (ret != 0) {
         flb_plg_error(ctx->ins, "error writing data to local azure_kusto file");
         return -1;
-    }*/
-    /* Append data to the target file */
+    }
+    /* Append data to the target file *//*
     ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
 
     if (ret != 0) {
         flb_plg_error(ctx->ins, "error writing data to local azure_kusto file");
         return -1;
-    }
+    }*/
 
     azure_kusto_file->size += bytes;
     ctx->current_buffer_size += bytes;
