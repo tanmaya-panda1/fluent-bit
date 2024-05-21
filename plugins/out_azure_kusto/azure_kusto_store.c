@@ -274,6 +274,7 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
 
         /* Use fstore opaque 'data' reference to keep our context */
         fsf->data = azure_kusto_file;
+    }
     else {
         fsf = azure_kusto_file->fsf;
     }
