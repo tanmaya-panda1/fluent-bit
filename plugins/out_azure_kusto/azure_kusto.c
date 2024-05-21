@@ -835,12 +835,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         flush_init(ctx,config);
 
-        ret = azure_kusto_load_ingestion_resources(ctx, config);
-        if (ret != 0) {
-            flb_plg_error(ctx->ins, "cannot load ingestion resources");
-            FLB_OUTPUT_RETURN(FLB_RETRY);
-        }
-
         flb_plg_debug(ctx->ins,"event tag is  ::: %s", event_chunk->tag);
 
         if (pthread_mutex_lock(&ctx->buffer_mutex)) {
