@@ -951,6 +951,11 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             }else{
                 flb_plg_error(ctx->ins, "unable to ingest file ");
                 flb_sds_destroy(json);
+                // *** RELEASE THE LOCK HERE ***
+                if (flock(upload_file->lock_fd, LOCK_UN) == -1) {
+                    flb_plg_error(ctx->ins, "Failed to unlock file '%s': %s", upload_file->fsf->name, strerror(errno));
+                }
+                close(upload_file->lock_fd);
                 FLB_OUTPUT_RETURN(FLB_ERROR);
             }
         }
@@ -960,14 +965,18 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             FLB_OUTPUT_RETURN(FLB_ERROR);
         }
 
-        /* Get a file candidate matching the given 'tag' */
-        upload_file = azure_kusto_store_file_get(ctx,
-                                                 event_chunk->tag,
-                                                 event_chunk->size);
-
         /* Buffer current chunk in filesystem and wait for next chunk from engine */
         ret = buffer_chunk(ctx, upload_file, json, json_size,
                            event_chunk->tag, flb_sds_len(event_chunk->tag));
+
+        // Release the file lock after buffering
+        if (upload_file != NULL) {
+            if (flock(upload_file->lock_fd, LOCK_UN) == -1) {
+                flb_plg_error(ctx->ins, "Failed to unlock file '%s': %s", upload_file->fsf->name, strerror(errno));
+                // Handle error appropriately (e.g., log and continue)
+            }
+            close(upload_file->lock_fd);
+        }
 
         if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
             flb_plg_error(ctx->ins, "error unlocking mutex");

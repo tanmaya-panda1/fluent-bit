@@ -95,6 +95,20 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
         if (strncmp((char *) fsf->name, tag, tag_len) == 0 ) {
             flb_plg_debug(ctx->ins, "Found matching file '%s' for tag '%.*s'", fsf->name, tag_len, tag);
             found = 1;
+
+            // Acquire file lock
+            azure_kusto_file = fsf->data;
+            azure_kusto_file->lock_fd = open(fsf->name, O_RDWR); // Open for read/write to allow appending
+            if (azure_kusto_file->lock_fd == -1) {
+                flb_plg_error(ctx->ins, "Failed to open file '%s' for locking: %s", fsf->name, strerror(errno));
+                return NULL; // Or handle the error appropriately
+            }
+            if (flock(azure_kusto_file->lock_fd, LOCK_EX) == -1) {
+                flb_plg_error(ctx->ins, "Failed to lock file '%s': %s", fsf->name, strerror(errno));
+                close(azure_kusto_file->lock_fd);
+                return NULL; // Or handle the error appropriately
+            }
+
             break;
         }
     }
@@ -121,75 +135,11 @@ int flb_fstore_file_exists(struct flb_fstore *fs, flb_sds_t name)
     return FLB_FALSE;
 }
 
-int flb_fstore_file_content_replace(struct flb_azure_kusto *ctx,struct azure_kusto_file *azure_kusto_file,
-                                    flb_sds_t data, size_t bytes) {
-
-    int fd, ret;
-
-    flb_sds_t path;
-
-    flb_plg_trace(ctx->ins, "inside flb_fstore_file_content_replace");
-
-    path = flb_sds_create_size(flb_sds_len(flb_sds_create(ctx->fs->root_path)) + flb_sds_len(azure_kusto_file->fsf->name) + 2);
-    if (path == NULL) {
-        flb_plg_error(ctx->ins, "failed to allocate memory for path");
-        return -1;
-    }
-
-    flb_sds_printf(&path, "%s/%s",flb_sds_create(ctx->fs->root_path), azure_kusto_file->fsf->name);
-
-    flb_plg_trace(ctx->ins, "inside flb_fstore_file_content_replace path=%s", path);
-
-    // Open the file and get the file descriptor
-    fd = open(path, O_WRONLY);
-    if (fd == -1) {
-        flb_plg_error(ctx->ins, "Error opening file: %s", strerror(errno));
-        return -1;
-    }
-
-    // Acquire an exclusive lock using flock
-    ret = flock(fd, LOCK_EX);
-    if (ret == -1) {
-        flb_plg_error(ctx->ins, "Error acquiring lock: %s", strerror(errno));
-        close(fd);
-        return -1;
-    }
-
-    // Truncate the existing file content
-    ret = ftruncate(fd, 0);
-    if (ret == -1) {
-        flb_plg_error(ctx->ins, "Error truncating file: %s", strerror(errno));
-        flock(fd, LOCK_UN);
-        close(fd);
-        return -1;
-    }
-
-    // Write the new data to the file
-    ret = write(fd, data, bytes);
-    if (ret == -1) {
-        flb_plg_error(ctx->ins, "Error writing data to file: %s", strerror(errno));
-        flock(fd, LOCK_UN);
-        close(fd);
-        return -1;
-    }
-
-    flb_sds_destroy(path);
-
-    // Release the lock
-    flock(fd, LOCK_UN);
-
-    // Close the file
-    close(fd);
-
-    return 0;
-}
-
 
 /* Append data to a new or existing fstore file */
 int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file,
                                  flb_sds_t tag, size_t tag_len,
-                        flb_sds_t data, size_t bytes)
-{
+                        flb_sds_t data, size_t bytes) {
     int ret;
     int fd;
     flb_sds_t name;
@@ -204,7 +154,6 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
 
     /* If no target file was found, create a new one */
     if (azure_kusto_file == NULL) {
-        //name = flb_sds_create_len(tag, tag_len);
         name = tag;
         if (!name) {
             flb_plg_error(ctx->ins, "could not generate chunk file name");
@@ -240,6 +189,7 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         }
         azure_kusto_file->fsf = fsf;
         azure_kusto_file->create_time = time(NULL);
+        azure_kusto_file->size = 0; // Initialize size to 0
 
         flb_sds_t path_sds = flb_sds_create(ctx->stream_active->path);
         if (path_sds == NULL) {
@@ -274,60 +224,58 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
 
         /* Use fstore opaque 'data' reference to keep our context */
         fsf->data = azure_kusto_file;
-    }
-    else {
-        fsf = azure_kusto_file->fsf;
-    }
 
-    if (azure_kusto_file->file_path == NULL) {
-        flb_plg_error(ctx->ins, "azure_kusto_file->file_path is NULL");
-        return -1;
-    }
-
-    /* Open the file descriptor using the file_path */
-    fd = open(azure_kusto_file->file_path, O_WRONLY);
-    if (fd == -1) {
-        flb_plg_error(ctx->ins, "could not open file '%s' for locking: %s", azure_kusto_file->file_path, strerror(errno));
-        return -1;
-    }
-
-    /* Acquire the lock */
-    if (flock(fd, LOCK_EX) == -1) {
-        flb_plg_error(ctx->ins, "could not lock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
-        close(fd);
-        return -1;
-    }
-
-    /* Append data to the target file */
-    ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
-
-    /* Release the lock */
-    if (flock(fd, LOCK_UN) == -1) {
-        flb_plg_error(ctx->ins, "could not unlock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
-    }
-    close(fd);
-
-    if (ret != 0) {
-        flb_plg_error(ctx->ins, "error writing data to local azure_kusto file");
-        return -1;
-    }
-
-    azure_kusto_file->size += bytes;
-    ctx->current_buffer_size += bytes;
-
-    flb_plg_debug(ctx->ins, "[azure_kusto] new file size: %zu", azure_kusto_file->size);
-    flb_plg_debug(ctx->ins, "[azure_kusto] current_buffer_size: %zu", ctx->current_buffer_size);
-
-    /* if buffer is 95% full, warn user */
-    if (ctx->store_dir_limit_size > 0) {
-        space_remaining = ctx->store_dir_limit_size - ctx->current_buffer_size;
-        if ((space_remaining * 20) < ctx->store_dir_limit_size) {
-            flb_plg_warn(ctx->ins, "Buffer is almost full: current_buffer_size=%zu, store_dir_limit_size=%zu bytes",
-                         ctx->current_buffer_size, ctx->store_dir_limit_size);
+        // Acquire file lock (for newly created file)
+        azure_kusto_file->lock_fd = open(azure_kusto_file->file_path, O_RDWR);
+        if (azure_kusto_file->lock_fd == -1) {
+            flb_plg_error(ctx->ins, "could not open file '%s' for locking: %s", azure_kusto_file->file_path,
+                          strerror(errno));
+            flb_free(azure_kusto_file);
+            flb_fstore_file_delete(ctx->fs, fsf);
             return -1;
         }
-    }
+        if (flock(azure_kusto_file->lock_fd, LOCK_EX) == -1) {
+            flb_plg_error(ctx->ins, "could not lock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
+            close(azure_kusto_file->lock_fd);
+            flb_free(azure_kusto_file);
+            flb_fstore_file_delete(ctx->fs, fsf);
+            return -1;
+        } else {
+            fsf = azure_kusto_file->fsf;
+        }
 
+        if (azure_kusto_file->file_path == NULL) {
+            flb_plg_error(ctx->ins, "azure_kusto_file->file_path is NULL");
+            return -1;
+        }
+
+        /* Append data to the target file */
+        ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
+
+        if (ret != 0) {
+            flb_plg_error(ctx->ins, "error writing data to local azure_kusto file");
+            // Release the lock in case of an error
+            flock(azure_kusto_file->lock_fd, LOCK_UN);
+            close(azure_kusto_file->lock_fd);
+            return -1;
+        }
+
+        azure_kusto_file->size += bytes;
+        ctx->current_buffer_size += bytes;
+
+        flb_plg_debug(ctx->ins, "[azure_kusto] new file size: %zu", azure_kusto_file->size);
+        flb_plg_debug(ctx->ins, "[azure_kusto] current_buffer_size: %zu", ctx->current_buffer_size);
+
+        /* if buffer is 95% full, warn user */
+        if (ctx->store_dir_limit_size > 0) {
+            space_remaining = ctx->store_dir_limit_size - ctx->current_buffer_size;
+            if ((space_remaining * 20) < ctx->store_dir_limit_size) {
+                flb_plg_warn(ctx->ins, "Buffer is almost full: current_buffer_size=%zu, store_dir_limit_size=%zu bytes",
+                             ctx->current_buffer_size, ctx->store_dir_limit_size);
+                return -1;
+            }
+        }
+    }
     return 0;
 }
 
@@ -522,6 +470,14 @@ int azure_kusto_store_file_inactive(struct flb_azure_kusto *ctx, struct azure_ku
     struct flb_fstore_file *fsf;
 
     fsf = azure_kusto_file->fsf;
+
+    // Release the lock before making the file inactive
+    if (flock(azure_kusto_file->lock_fd, LOCK_UN) == -1) {
+        flb_plg_error(ctx->ins, "Failed to unlock file '%s': %s", azure_kusto_file->fsf->name, strerror(errno));
+        // Handle error appropriately (e.g., log and continue)
+    }
+    close(azure_kusto_file->lock_fd);
+
     flb_free(azure_kusto_file);
     ret = flb_fstore_file_inactive(ctx->fs, fsf);
 
@@ -530,55 +486,44 @@ int azure_kusto_store_file_inactive(struct flb_azure_kusto *ctx, struct azure_ku
 
 int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file)
 {
+    int ret;
     struct flb_fstore_file *fsf;
-    int fd;
 
     fsf = azure_kusto_file->fsf;
     if (fsf != NULL) {
         ctx->current_buffer_size -= azure_kusto_file->size;
 
-        // Check if the file exists
-        if (access(azure_kusto_file->file_path, F_OK) == -1) {
-            flb_plg_warn(ctx->ins, "File '%s' does not exist", azure_kusto_file->file_path);
-            flb_sds_destroy(azure_kusto_file->file_path);
-            flb_free(azure_kusto_file);
-            return -1;
-        }
-
-        // Open the file
-        fd = open(azure_kusto_file->file_path, O_RDWR);
-        if (fd == -1) {
-            flb_plg_error(ctx->ins, "Failed to open file '%s': %s", azure_kusto_file->file_path, strerror(errno));
-            flb_sds_destroy(azure_kusto_file->file_path);
-            flb_free(azure_kusto_file);
-            return -1;
-        }
-
-        // Acquire an exclusive lock on the file
-        if (flock(fd, LOCK_EX) == -1) {
-            flb_plg_error(ctx->ins, "Failed to lock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
-            close(fd);
-            flb_sds_destroy(azure_kusto_file->file_path);
-            flb_free(azure_kusto_file);
-            return -1;
+        // Acquire file lock before deletion
+        if (flock(azure_kusto_file->lock_fd, LOCK_EX) == -1) {
+            flb_plg_error(ctx->ins, "Failed to lock file '%s' for deletion: %s", azure_kusto_file->fsf->name, strerror(errno));
+            // Handle error appropriately (e.g., log and continue)
         }
 
         /* permanent deletion */
-        flb_fstore_file_delete(ctx->fs, fsf);
-
-        // Release the lock
-        if (flock(fd, LOCK_UN) == -1) {
-            flb_plg_error(ctx->ins, "Failed to unlock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
-            close(fd);
-            flb_sds_destroy(azure_kusto_file->file_path);
-            flb_free(azure_kusto_file);
-            return -1;
+        ret = flb_fstore_file_delete(ctx->fs, fsf);
+        if (ret != 0) {
+            flb_plg_error(ctx->ins, "Failed to delete file '%s': %s", azure_kusto_file->fsf->name, strerror(errno));
+            // *** IMPORTANT: RELEASE LOCK ON DELETION FAILURE ***
+            if (flock(azure_kusto_file->lock_fd, LOCK_UN) == -1) {
+                flb_plg_error(ctx->ins, "Failed to unlock file '%s' after deletion failure: %s",
+                              azure_kusto_file->fsf->name, strerror(errno));
+                // Handle error (log and potentially take further action)
+            }
+            close(azure_kusto_file->lock_fd);
+        }else{
+            flb_plg_debug(ctx->ins, "Deleted file '%s'", azure_kusto_file->fsf->name);
+            // Release the lock after deletion
+            if (flock(azure_kusto_file->lock_fd, LOCK_UN) == -1) {
+                flb_plg_error(ctx->ins, "Failed to unlock file '%s': %s", azure_kusto_file->fsf->name, strerror(errno));
+                // Handle error appropriately (e.g., log and continue)
+            }
+            close(azure_kusto_file->lock_fd);
         }
-
-        close(fd);
-    }else {
+    } else {
         flb_plg_warn(ctx->ins, "The file might have been already deleted by another coroutine");
     }
+
+    //flb_sds_destroy(azure_kusto_file->file_path);
     flb_free(azure_kusto_file);
 
     return 0;
