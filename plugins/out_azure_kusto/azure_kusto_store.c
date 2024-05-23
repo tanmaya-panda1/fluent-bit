@@ -96,29 +96,28 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
         if (strncmp((char *) fsf->name, tag, tag_len) == 0 ) {
             flb_plg_debug(ctx->ins, "Found matching file '%s' for tag '%.*s'", fsf->name, tag_len, tag);
             found = 1;
-
-            // Acquire file lock
-            azure_kusto_file = fsf->data;
-            azure_kusto_file->lock_fd = open(azure_kusto_file->file_path, O_RDWR); // Open for read/write to allow appending
-            if (azure_kusto_file->lock_fd == -1) {
-                flb_plg_error(ctx->ins, "Failed to open file '%s' for locking: %s", azure_kusto_file->file_path, strerror(errno));
-                return NULL; // Or handle the error appropriately
-            }
-            if (flock(azure_kusto_file->lock_fd, LOCK_EX) == -1) {
-                flb_plg_error(ctx->ins, "Failed to lock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
-                close(azure_kusto_file->lock_fd);
-                return NULL; // Or handle the error appropriately
-            }
-
             break;
         }
     }
 
     if (!found) {
         return NULL;
-    }
+    } else {
+        // Acquire file lock
+        azure_kusto_file = fsf->data;
+        azure_kusto_file->lock_fd = open(azure_kusto_file->file_path, O_RDWR); // Open for read/write to allow appending
+        if (azure_kusto_file->lock_fd == -1) {
+            flb_plg_error(ctx->ins, "Failed to open file '%s' for locking: %s", azure_kusto_file->file_path, strerror(errno));
+            return NULL; // Or handle the error appropriately
+        }
+        if (flock(azure_kusto_file->lock_fd, LOCK_EX) == -1) {
+            flb_plg_error(ctx->ins, "Failed to lock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
+            close(azure_kusto_file->lock_fd);
+            return NULL; // Or handle the error appropriately
+        }
 
-    return fsf->data;
+        return fsf->data;
+    }
 }
 
 
