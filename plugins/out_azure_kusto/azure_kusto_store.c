@@ -69,6 +69,7 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
     struct flb_fstore_file *fsf = NULL;
     struct azure_kusto_file *azure_kusto_file;
     int found = 0;
+    int fd;
 
     /*
      * Based in the current ctx->stream_name, locate a candidate file to
@@ -98,13 +99,13 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
 
             // Acquire file lock
             azure_kusto_file = fsf->data;
-            azure_kusto_file->lock_fd = open(fsf->name, O_RDWR); // Open for read/write to allow appending
+            azure_kusto_file->lock_fd = open(azure_kusto_file->file_path, O_RDWR); // Open for read/write to allow appending
             if (azure_kusto_file->lock_fd == -1) {
-                flb_plg_error(ctx->ins, "Failed to open file '%s' for locking: %s", fsf->name, strerror(errno));
+                flb_plg_error(ctx->ins, "Failed to open file '%s' for locking: %s", azure_kusto_file->file_path, strerror(errno));
                 return NULL; // Or handle the error appropriately
             }
             if (flock(azure_kusto_file->lock_fd, LOCK_EX) == -1) {
-                flb_plg_error(ctx->ins, "Failed to lock file '%s': %s", fsf->name, strerror(errno));
+                flb_plg_error(ctx->ins, "Failed to lock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
                 close(azure_kusto_file->lock_fd);
                 return NULL; // Or handle the error appropriately
             }
@@ -240,9 +241,9 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
             flb_free(azure_kusto_file);
             flb_fstore_file_delete(ctx->fs, fsf);
             return -1;
-        } else {
-            fsf = azure_kusto_file->fsf;
         }
+    }else {
+        fsf = azure_kusto_file->fsf;
     }
 
     if (azure_kusto_file->file_path == NULL) {
@@ -473,7 +474,7 @@ int azure_kusto_store_file_inactive(struct flb_azure_kusto *ctx, struct azure_ku
 
     // Release the lock before making the file inactive
     if (flock(azure_kusto_file->lock_fd, LOCK_UN) == -1) {
-        flb_plg_error(ctx->ins, "Failed to unlock file '%s': %s", azure_kusto_file->fsf->name, strerror(errno));
+        flb_plg_error(ctx->ins, "Failed to unlock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
         // Handle error appropriately (e.g., log and continue)
     }
     close(azure_kusto_file->lock_fd);
