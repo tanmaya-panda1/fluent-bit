@@ -970,13 +970,13 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                            event_chunk->tag, flb_sds_len(event_chunk->tag));
 
         // Release the file lock after buffering
-        if (upload_file != NULL) {
+       /*if (upload_file != NULL) {
             if (flock(upload_file->lock_fd, LOCK_UN) == -1) {
                 flb_plg_error(ctx->ins, "Failed to unlock file '%s': %s", upload_file->fsf->name, strerror(errno));
                 // Handle error appropriately (e.g., log and continue)
             }
             close(upload_file->lock_fd);
-        }
+        }*/
 
         if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
             flb_plg_error(ctx->ins, "error unlocking mutex");

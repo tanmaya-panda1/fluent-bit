@@ -267,6 +267,10 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
     flb_plg_debug(ctx->ins, "[azure_kusto] new file size: %zu", azure_kusto_file->size);
     flb_plg_debug(ctx->ins, "[azure_kusto] current_buffer_size: %zu", ctx->current_buffer_size);
 
+    // Release the lock after appending data
+    flock(azure_kusto_file->lock_fd, LOCK_UN);
+    close(azure_kusto_file->lock_fd);
+
     /* if buffer is 95% full, warn user */
     if (ctx->store_dir_limit_size > 0) {
         space_remaining = ctx->store_dir_limit_size - ctx->current_buffer_size;
