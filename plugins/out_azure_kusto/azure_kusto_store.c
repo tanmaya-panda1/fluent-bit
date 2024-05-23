@@ -139,7 +139,7 @@ int flb_fstore_file_exists(struct flb_fstore *fs, flb_sds_t name)
 /* Append data to a new or existing fstore file */
 int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file,
                                  flb_sds_t tag, size_t tag_len,
-                        flb_sds_t data, size_t bytes) {
+                                 flb_sds_t data, size_t bytes) {
     int ret;
     int fd;
     flb_sds_t name;
@@ -243,37 +243,37 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         } else {
             fsf = azure_kusto_file->fsf;
         }
+    }
 
-        if (azure_kusto_file->file_path == NULL) {
-            flb_plg_error(ctx->ins, "azure_kusto_file->file_path is NULL");
+    if (azure_kusto_file->file_path == NULL) {
+        flb_plg_error(ctx->ins, "azure_kusto_file->file_path is NULL");
+        return -1;
+    }
+
+    /* Append data to the target file */
+    ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
+
+    if (ret != 0) {
+        flb_plg_error(ctx->ins, "error writing data to local azure_kusto file");
+        // Release the lock in case of an error
+        flock(azure_kusto_file->lock_fd, LOCK_UN);
+        close(azure_kusto_file->lock_fd);
+        return -1;
+    }
+
+    azure_kusto_file->size += bytes;
+    ctx->current_buffer_size += bytes;
+
+    flb_plg_debug(ctx->ins, "[azure_kusto] new file size: %zu", azure_kusto_file->size);
+    flb_plg_debug(ctx->ins, "[azure_kusto] current_buffer_size: %zu", ctx->current_buffer_size);
+
+    /* if buffer is 95% full, warn user */
+    if (ctx->store_dir_limit_size > 0) {
+        space_remaining = ctx->store_dir_limit_size - ctx->current_buffer_size;
+        if ((space_remaining * 20) < ctx->store_dir_limit_size) {
+            flb_plg_warn(ctx->ins, "Buffer is almost full: current_buffer_size=%zu, store_dir_limit_size=%zu bytes",
+                         ctx->current_buffer_size, ctx->store_dir_limit_size);
             return -1;
-        }
-
-        /* Append data to the target file */
-        ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
-
-        if (ret != 0) {
-            flb_plg_error(ctx->ins, "error writing data to local azure_kusto file");
-            // Release the lock in case of an error
-            flock(azure_kusto_file->lock_fd, LOCK_UN);
-            close(azure_kusto_file->lock_fd);
-            return -1;
-        }
-
-        azure_kusto_file->size += bytes;
-        ctx->current_buffer_size += bytes;
-
-        flb_plg_debug(ctx->ins, "[azure_kusto] new file size: %zu", azure_kusto_file->size);
-        flb_plg_debug(ctx->ins, "[azure_kusto] current_buffer_size: %zu", ctx->current_buffer_size);
-
-        /* if buffer is 95% full, warn user */
-        if (ctx->store_dir_limit_size > 0) {
-            space_remaining = ctx->store_dir_limit_size - ctx->current_buffer_size;
-            if ((space_remaining * 20) < ctx->store_dir_limit_size) {
-                flb_plg_warn(ctx->ins, "Buffer is almost full: current_buffer_size=%zu, store_dir_limit_size=%zu bytes",
-                             ctx->current_buffer_size, ctx->store_dir_limit_size);
-                return -1;
-            }
         }
     }
     return 0;
