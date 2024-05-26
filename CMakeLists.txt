@@ -8,7 +8,7 @@ set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
 # Fluent Bit Version
 set(FLB_VERSION_MAJOR  3)
 set(FLB_VERSION_MINOR  0)
-set(FLB_VERSION_PATCH  3)
+set(FLB_VERSION_PATCH  6)
 set(FLB_VERSION_STR "${FLB_VERSION_MAJOR}.${FLB_VERSION_MINOR}.${FLB_VERSION_PATCH}")
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -209,6 +209,7 @@ option(FLB_IN_ELASTICSEARCH            "Enable Elasticsearch (Bulk API) input pl
 option(FLB_IN_CALYPTIA_FLEET           "Enable Calyptia Fleet input plugin"           Yes)
 option(FLB_IN_SPLUNK                   "Enable Splunk HTTP HEC input plugin"          Yes)
 option(FLB_IN_PROCESS_EXPORTER_METRICS "Enable process exporter metrics input plugin" Yes)
+option(FLB_IN_PROMETHEUS_REMOTE_WRITE  "Enable prometheus remote write input plugin"  Yes)
 option(FLB_OUT_AZURE                   "Enable Azure output plugin"                   Yes)
 option(FLB_OUT_AZURE_BLOB              "Enable Azure output plugin"                   Yes)
 option(FLB_OUT_AZURE_LOGS_INGESTION    "Enable Azure Logs Ingestion output plugin"    Yes)
