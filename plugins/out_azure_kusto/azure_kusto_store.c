@@ -478,7 +478,6 @@ int azure_kusto_store_file_inactive(struct flb_azure_kusto *ctx, struct azure_ku
     // Release the lock before making the file inactive
     if (flock(azure_kusto_file->lock_fd, LOCK_UN) == -1) {
         flb_plg_error(ctx->ins, "Failed to unlock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
-        // Handle error appropriately (e.g., log and continue)
     }
     close(azure_kusto_file->lock_fd);
 
@@ -497,21 +496,15 @@ int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kust
     if (fsf != NULL) {
         ctx->current_buffer_size -= azure_kusto_file->size;
 
-        // Acquire file lock before deletion
-        if (flock(azure_kusto_file->lock_fd, LOCK_EX) == -1) {
-            flb_plg_error(ctx->ins, "Failed to lock file '%s' for deletion: %s", azure_kusto_file->fsf->name, strerror(errno));
-            // Handle error appropriately (e.g., log and continue)
-        }
-
         /* permanent deletion */
         ret = flb_fstore_file_delete(ctx->fs, fsf);
+        // if successfully not deleted, release the lock
         if (ret != 0) {
             flb_plg_error(ctx->ins, "Failed to delete file '%s': %s", azure_kusto_file->fsf->name, strerror(errno));
             // *** IMPORTANT: RELEASE LOCK ON DELETION FAILURE ***
             if (flock(azure_kusto_file->lock_fd, LOCK_UN) == -1) {
                 flb_plg_error(ctx->ins, "Failed to unlock file '%s' after deletion failure: %s",
                               azure_kusto_file->fsf->name, strerror(errno));
-                // Handle error (log and potentially take further action)
             }
             close(azure_kusto_file->lock_fd);
         }else{
@@ -519,7 +512,6 @@ int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kust
             // Release the lock after deletion
             if (flock(azure_kusto_file->lock_fd, LOCK_UN) == -1) {
                 flb_plg_error(ctx->ins, "Failed to unlock file '%s': %s", azure_kusto_file->fsf->name, strerror(errno));
-                // Handle error appropriately (e.g., log and continue)
             }
             close(azure_kusto_file->lock_fd);
         }
@@ -527,7 +519,6 @@ int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kust
         flb_plg_warn(ctx->ins, "The file might have been already deleted by another coroutine");
     }
 
-    //flb_sds_destroy(azure_kusto_file->file_path);
     flb_free(azure_kusto_file);
 
     return 0;

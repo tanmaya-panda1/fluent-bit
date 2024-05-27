@@ -865,6 +865,24 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         cJSON_Delete(root);
 
+        if (json_size >= 2 && json[0] == '[' && json[json_size - 1] == ']') {
+            // Reduce 'bytes' by 1 to remove the ']' at the end
+            json_size--;
+
+            // Perform the shift to remove the '[' at the beginning
+            memmove(json, json + 1, json_size - 2);
+            json_size--;  // Adjust bytes to account for the removal of '['
+
+            // Set the new length of the data string
+            flb_sds_len_set(json, json_size);
+
+            // Add a comma to the end
+            json = flb_sds_cat(json, ",", 1);
+            json_size = flb_sds_len(json);
+        }else{
+            flb_plg_warn(ctx->ins, "data from event chunk is not an json array or empty in json chunk %s", event_chunk->tag);
+        }
+
         /* Get a file candidate matching the given 'tag' */
         upload_file = azure_kusto_store_file_get(ctx,
                                         event_chunk->tag,
@@ -891,24 +909,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             flb_plg_trace(ctx->ins, "total_file_size exceeded %s",
                          event_chunk->tag);
             total_file_size_check = FLB_TRUE;
-        }
-
-        if (json_size >= 2 && json[0] == '[' && json[json_size - 1] == ']') {
-            // Reduce 'bytes' by 1 to remove the ']' at the end
-            json_size--;
-
-            // Perform the shift to remove the '[' at the beginning
-            memmove(json, json + 1, json_size - 2);
-            json_size--;  // Adjust bytes to account for the removal of '['
-
-            // Set the new length of the data string
-            flb_sds_len_set(json, json_size);
-
-            // Add a comma to the end
-            json = flb_sds_cat(json, ",", 1);
-            json_size = flb_sds_len(json);
-        }else{
-            flb_plg_warn(ctx->ins, "data from event chunk is not an json array or empty in json chunk %s", event_chunk->tag);
         }
 
         if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
@@ -969,14 +969,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         ret = buffer_chunk(ctx, upload_file, json, json_size,
                            event_chunk->tag, flb_sds_len(event_chunk->tag));
 
-        // Release the file lock after buffering
-       /*if (upload_file != NULL) {
-            if (flock(upload_file->lock_fd, LOCK_UN) == -1) {
-                flb_plg_error(ctx->ins, "Failed to unlock file '%s': %s", upload_file->fsf->name, strerror(errno));
-                // Handle error appropriately (e.g., log and continue)
-            }
-            close(upload_file->lock_fd);
-        }*/
 
         if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
             flb_plg_error(ctx->ins, "error unlocking mutex");
