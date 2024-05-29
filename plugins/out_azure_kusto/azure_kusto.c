@@ -275,7 +275,7 @@ static int construct_request_buffer(struct flb_azure_kusto *ctx, flb_sds_t new_d
         /*
          * lock the upload_file from buffer list
          */
-        //azure_kusto_store_file_lock(upload_file);
+        azure_kusto_store_file_lock(upload_file);
         body = buffered_data;
         body_size = buffer_size;
     }

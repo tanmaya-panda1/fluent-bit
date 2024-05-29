@@ -144,12 +144,6 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
             flb_fstore_file_delete(ctx->fs, fsf);
         }
 
-        flb_plg_debug(ctx->ins, "fsf->meta_size %zu", fsf->meta_size);
-        flb_plg_debug(ctx->ins, "tag_len %d", tag_len);
-
-        flb_plg_debug(ctx->ins, "fsf->meta_buf %s", (char *) fsf->meta_buf);
-        flb_plg_debug(ctx->ins, "tag -> %s", tag);
-
         if (fsf->meta_size != tag_len) {
             fsf = NULL;
             continue;
