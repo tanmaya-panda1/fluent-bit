@@ -275,7 +275,7 @@ static int construct_request_buffer(struct flb_azure_kusto *ctx, flb_sds_t new_d
         /*
          * lock the upload_file from buffer list
          */
-        azure_kusto_store_file_lock(upload_file);
+        //azure_kusto_store_file_lock(upload_file);
         body = buffered_data;
         body_size = buffer_size;
     }
@@ -918,12 +918,18 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
         if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
+            flb_plg_debug(ctx->ins, "uploading file %s with size %zu", upload_file->fsf->name, upload_file->size);
+            //azure_kusto_store_file_lock(upload_file);
             /* Load or refresh ingestion resources */
             ret = azure_kusto_load_ingestion_resources(ctx, config);
             if (ret != 0) {
                 flb_plg_error(ctx->ins, "cannot load ingestion resources");
                 FLB_OUTPUT_RETURN(FLB_RETRY);
             }
+
+            upload_file = azure_kusto_store_file_get(ctx,
+                                                     event_chunk->tag,
+                                                     event_chunk->size);
 
             /* Send upload directly without upload queue */
             ret = ingest_to_kusto_ext(ctx, json, upload_file,
@@ -950,30 +956,25 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                 }
             }else{
                 flb_plg_error(ctx->ins, "unable to ingest file ");
+                //azure_kusto_store_file_unlock(upload_file);
                 flb_sds_destroy(json);
                 // *** RELEASE THE LOCK HERE ***
-                if (flock(upload_file->lock_fd, LOCK_UN) == -1) {
+                /*if (flock(upload_file->lock_fd, LOCK_UN) == -1) {
                     flb_plg_error(ctx->ins, "Failed to unlock file '%s': %s", upload_file->fsf->name, strerror(errno));
-                }
-                close(upload_file->lock_fd);
+                }*/
+                //close(upload_file->lock_fd);
                 FLB_OUTPUT_RETURN(FLB_ERROR);
             }
         }
 
-        if (pthread_mutex_lock(&ctx->buffer_mutex)) {
-            flb_plg_error(ctx->ins, "error locking mutex");
-            FLB_OUTPUT_RETURN(FLB_ERROR);
-        }
+        //upload_file = azure_kusto_store_file_get_and_lock(ctx,
+        //                                         event_chunk->tag,
+        //                                         event_chunk->size);
 
         /* Buffer current chunk in filesystem and wait for next chunk from engine */
         ret = buffer_chunk(ctx, upload_file, json, json_size,
                            event_chunk->tag, flb_sds_len(event_chunk->tag));
 
-
-        if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
-            flb_plg_error(ctx->ins, "error unlocking mutex");
-            FLB_OUTPUT_RETURN(FLB_ERROR);
-        }
 
         if (ret == 0) {
             flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
@@ -982,7 +983,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         } else {
             flb_plg_error(ctx->ins, "failed to buffer chunk %s", event_chunk->tag);
             flb_sds_destroy(json);
-            FLB_OUTPUT_RETURN(FLB_ERROR);
+            FLB_OUTPUT_RETURN(FLB_RETRY);
         }
 
     } else {
