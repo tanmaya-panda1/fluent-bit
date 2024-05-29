@@ -886,7 +886,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         /* Get a file candidate matching the given 'tag' */
         upload_file = azure_kusto_store_file_get(ctx,
                                         event_chunk->tag,
-                                        event_chunk->size);
+                                                 tag_len);
 
         /* Discard upload_file if it has failed to upload MAX_UPLOAD_ERRORS times */
         if (upload_file != NULL && upload_file->failures >= MAX_UPLOAD_ERRORS) {
@@ -927,9 +927,9 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                 FLB_OUTPUT_RETURN(FLB_RETRY);
             }
 
-            upload_file = azure_kusto_store_file_get(ctx,
-                                                     event_chunk->tag,
-                                                     event_chunk->size);
+            //upload_file = azure_kusto_store_file_get(ctx,
+            //                                         event_chunk->tag,
+            //                                         event_chunk->size);
 
             /* Send upload directly without upload queue */
             ret = ingest_to_kusto_ext(ctx, json, upload_file,
