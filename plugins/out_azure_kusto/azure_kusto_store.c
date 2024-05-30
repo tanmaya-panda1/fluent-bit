@@ -530,10 +530,10 @@ int azure_kusto_store_file_inactive(struct flb_azure_kusto *ctx, struct azure_ku
     fsf = azure_kusto_file->fsf;
 
     // Release the lock before making the file inactive
-    if (flock(azure_kusto_file->lock_fd, LOCK_UN) == -1) {
+    /*if (flock(azure_kusto_file->lock_fd, LOCK_UN) == -1) {
         flb_plg_error(ctx->ins, "Failed to unlock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
     }
-    close(azure_kusto_file->lock_fd);
+    close(azure_kusto_file->lock_fd);*/
 
     flb_free(azure_kusto_file);
     ret = flb_fstore_file_inactive(ctx->fs, fsf);
