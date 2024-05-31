@@ -812,14 +812,6 @@ static int azure_kusto_format(struct flb_azure_kusto *ctx, const char *tag, int 
         flb_sds_destroy(json_record);
     }
 
-    if (ret != FLB_EVENT_DECODER_SUCCESS) {
-        flb_plg_error(ctx->ins, "error decoding log event: %d", ret);
-        flb_sds_destroy(out_buf);
-        msgpack_sbuffer_destroy(&mp_sbuf);
-        flb_log_event_decoder_destroy(&log_decoder);
-        return -1;
-    }
-
     msgpack_sbuffer_destroy(&mp_sbuf);
     flb_log_event_decoder_destroy(&log_decoder);
 
