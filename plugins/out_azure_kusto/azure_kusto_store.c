@@ -194,7 +194,6 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
                                  flb_sds_t tag, size_t tag_len,
                                  flb_sds_t data, size_t bytes) {
     int ret;
-    int fd;
     flb_sds_t name;
     struct flb_fstore_file *fsf;
     size_t space_remaining;
@@ -299,10 +298,10 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         fsf = azure_kusto_file->fsf;
     }
 
-    if (azure_kusto_file->file_path == NULL) {
+    /*if (azure_kusto_file->file_path == NULL) {
         flb_plg_error(ctx->ins, "azure_kusto_file->file_path is NULL");
         return -1;
-    }
+    }*/
 
     /* Append data to the target file */
     ret = flb_fstore_file_append(azure_kusto_file->fsf, data, bytes);
@@ -331,7 +330,6 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         if ((space_remaining * 20) < ctx->store_dir_limit_size) {
             flb_plg_warn(ctx->ins, "Buffer is almost full: current_buffer_size=%zu, store_dir_limit_size=%zu bytes",
                          ctx->current_buffer_size, ctx->store_dir_limit_size);
-            return -1;
         }
     }
     return 0;
