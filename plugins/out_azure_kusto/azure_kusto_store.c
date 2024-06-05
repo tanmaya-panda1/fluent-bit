@@ -69,7 +69,6 @@ struct azure_kusto_file *azure_kusto_store_file_get_and_lock(struct flb_azure_ku
     struct flb_fstore_file *fsf = NULL;
     struct azure_kusto_file *azure_kusto_file;
     int found = 0;
-    int fd;
 
     /*
      * Based in the current ctx->stream_name, locate a candidate file to
@@ -129,7 +128,6 @@ struct azure_kusto_file *azure_kusto_store_file_get(struct flb_azure_kusto *ctx,
     struct flb_fstore_file *fsf = NULL;
     struct azure_kusto_file *azure_kusto_file;
     int found = 0;
-    int fd;
 
     /*
      * Based in the current ctx->stream_name, locate a candidate file to
@@ -206,7 +204,6 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
 
     /* If no target file was found, create a new one */
     if (azure_kusto_file == NULL) {
-        //name = tag;
         name = gen_store_filename(tag);
         if (!name) {
             flb_plg_error(ctx->ins, "could not generate chunk file name");
@@ -244,39 +241,9 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         azure_kusto_file->create_time = time(NULL);
         azure_kusto_file->size = 0; // Initialize size to 0
 
-        flb_sds_t path_sds = flb_sds_create(ctx->stream_active->path);
-        if (path_sds == NULL) {
-            flb_plg_error(ctx->ins, "failed to create path_sds");
-            flb_free(azure_kusto_file);
-            flb_fstore_file_delete(ctx->fs, fsf);
-            return -1;
-        }
-        // Append a slash ("/") to the path
-        path_sds = flb_sds_cat(path_sds, "/", 1);
-        if (path_sds == NULL) {
-            flb_plg_error(ctx->ins, "failed to append '/' to path_sds");
-            flb_sds_destroy(path_sds);
-            flb_free(azure_kusto_file);
-            flb_fstore_file_delete(ctx->fs, fsf);
-            return -1;
-        }
-
-        // Append the fileName to the path
-        path_sds = flb_sds_cat(path_sds, azure_kusto_file->fsf->name, flb_sds_len(azure_kusto_file->fsf->name));
-        if (path_sds == NULL) {
-            flb_plg_error(ctx->ins, "failed to append file name to path_sds");
-            flb_sds_destroy(path_sds);
-            flb_free(azure_kusto_file);
-            flb_fstore_file_delete(ctx->fs, fsf);
-            return -1;
-        }
-
-        azure_kusto_file->file_path = path_sds;
-
-        flb_plg_debug(ctx->ins, "[azure_kusto] new file path: %s", azure_kusto_file->file_path);
-
         /* Use fstore opaque 'data' reference to keep our context */
         fsf->data = azure_kusto_file;
+        flb_sds_destroy(name);
 
         // Acquire file lock (for newly created file)
         /*azure_kusto_file->lock_fd = open(azure_kusto_file->file_path, O_RDWR);
