@@ -227,23 +227,6 @@ flb_sds_t execute_ingest_csl_command(struct flb_azure_kusto *ctx, const char *cs
     return resp;
 }
 
-
-static void add_comma_to_beginning(flb_sds_t *data) {
-    size_t len = flb_sds_len(*data);
-
-    // Resize the string to accommodate the comma
-    *data = flb_sds_increase(*data, 1);
-
-    // Shift the existing characters to the right by one position
-    memmove(*data + 1, *data, len);
-
-    // Add the comma at the beginning
-    (*data)[0] = ',';
-
-    // Update the string length
-    flb_sds_len_set(*data, len + 1);
-}
-
 /*
  * Either new_data or chunk can be NULL, but not both
  */
@@ -391,34 +374,6 @@ static int cb_azure_kusto_ingest(struct flb_config *config, void *data)
     return ret;
 }
 
-void add_brackets_sds(flb_sds_t *data) {
-    size_t len = flb_sds_len(*data);
-    // Remove trailing comma if present
-    if (len > 0 && (*data)[len - 1] == ',') {
-        flb_sds_len_set(*data, len - 1);
-    }
-    flb_sds_t tmp = flb_sds_create("[");
-    if (!tmp) {
-        return; // Handle allocation failure
-    }
-
-    // Concatenate the existing data (now without the trailing comma)
-    tmp = flb_sds_cat(tmp, *data, flb_sds_len(*data));
-    if (!tmp) {
-        return; // Handle possible reallocation failure
-    }
-
-    // Append the closing bracket
-    tmp = flb_sds_cat(tmp, "]", 1);
-    if (!tmp) {
-        return; // Handle possible reallocation failure
-    }
-
-    // Destroy the old data and update the pointer
-    flb_sds_destroy(*data);
-    *data = tmp;
-}
-
 /* ingest data to Azure Kusto */
 static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
                                struct azure_kusto_file *upload_file,
@@ -462,6 +417,7 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
             flb_plg_error(ctx->ins,
                           "cannot gzip payload");
             flb_sds_destroy(payload);
+            pthread_mutex_unlock(&ctx->buffer_mutex);
             return -1;
         }
         else {
@@ -496,18 +452,6 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
     }
 
     return 0;
-}
-
-/* Helper function to check if a JSON object is valid */
-int is_valid_json(const char *json_str) {
-    cJSON *json = cJSON_Parse(json_str);
-
-    if (json == NULL) {
-        return 0; // Invalid JSON
-    }
-
-    cJSON_Delete(json); // Clean up JSON object
-    return 1; // Valid JSON
 }
 
 
@@ -597,119 +541,6 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
 
     return 0;
 }
-
-/*static int azure_kusto_format(struct flb_azure_kusto *ctx, const char *tag, int tag_len,
-                              const void *data, size_t bytes, void **out_data,
-                              size_t *out_size)
-{
-    int records = 0;
-    msgpack_sbuffer mp_sbuf;
-    msgpack_packer mp_pck;
-    *//* for sub msgpack objs *//*
-    int map_size;
-    struct tm tms;
-    char time_formatted[32];
-    size_t s;
-    int len;
-    struct flb_log_event_decoder log_decoder;
-    struct flb_log_event         log_event;
-    int                          ret;
-    *//* output buffer *//*
-    flb_sds_t out_buf;
-
-    *//* Create array for all records *//*
-    records = flb_mp_count(data, bytes);
-    if (records <= 0) {
-        flb_plg_error(ctx->ins, "error counting msgpack entries");
-        return -1;
-    }
-
-    ret = flb_log_event_decoder_init(&log_decoder, (char *) data, bytes);
-
-    if (ret != FLB_EVENT_DECODER_SUCCESS) {
-        flb_plg_error(ctx->ins,
-                      "Log event decoder initialization error : %d", ret);
-
-        return -1;
-    }
-
-    *//* Create temporary msgpack buffer *//*
-    msgpack_sbuffer_init(&mp_sbuf);
-    msgpack_packer_init(&mp_pck, &mp_sbuf, msgpack_sbuffer_write);
-
-    msgpack_pack_array(&mp_pck, records);
-
-    while ((ret = flb_log_event_decoder_next(
-                    &log_decoder,
-                    &log_event)) == FLB_EVENT_DECODER_SUCCESS) {
-        map_size = 1;
-        if (ctx->include_time_key == FLB_TRUE) {
-            map_size++;
-        }
-
-        if (ctx->include_tag_key == FLB_TRUE) {
-            map_size++;
-        }
-
-        msgpack_pack_map(&mp_pck, map_size);
-
-        *//* include_time_key *//*
-        if (ctx->include_time_key == FLB_TRUE) {
-            msgpack_pack_str(&mp_pck, flb_sds_len(ctx->time_key));
-            msgpack_pack_str_body(&mp_pck, ctx->time_key, flb_sds_len(ctx->time_key));
-
-            *//* Append the time value as ISO 8601 *//*
-            gmtime_r(&log_event.timestamp.tm.tv_sec, &tms);
-            s = strftime(time_formatted, sizeof(time_formatted) - 1,
-                         FLB_PACK_JSON_DATE_ISO8601_FMT, &tms);
-
-            len = snprintf(time_formatted + s, sizeof(time_formatted) - 1 - s,
-                           ".%03" PRIu64 "Z",
-                           (uint64_t)log_event.timestamp.tm.tv_nsec / 1000000);
-            s += len;
-            msgpack_pack_str(&mp_pck, s);
-            msgpack_pack_str_body(&mp_pck, time_formatted, s);
-        }
-
-        *//* include_tag_key *//*
-        if (ctx->include_tag_key == FLB_TRUE) {
-            msgpack_pack_str(&mp_pck, flb_sds_len(ctx->tag_key));
-            msgpack_pack_str_body(&mp_pck, ctx->tag_key, flb_sds_len(ctx->tag_key));
-            msgpack_pack_str(&mp_pck, tag_len);
-            msgpack_pack_str_body(&mp_pck, tag, tag_len);
-        }
-
-        msgpack_pack_str(&mp_pck, flb_sds_len(ctx->log_key));
-        msgpack_pack_str_body(&mp_pck, ctx->log_key, flb_sds_len(ctx->log_key));
-
-        *//* Check if log_event.body is available *//*
-        if (log_event.body != NULL) {
-            msgpack_pack_object(&mp_pck, *log_event.body);
-        } else {
-            *//* Handle missing "log" attribute *//*
-            *//* Pack a default value *//*
-            msgpack_pack_str(&mp_pck, 20);
-            msgpack_pack_str_body(&mp_pck, "log_attribute_missing", 20);
-        }
-    }
-
-    *//* Convert from msgpack to JSON *//*
-    out_buf = flb_msgpack_raw_to_json_sds(mp_sbuf.data, mp_sbuf.size);
-
-    *//* Cleanup *//*
-    flb_log_event_decoder_destroy(&log_decoder);
-    msgpack_sbuffer_destroy(&mp_sbuf);
-
-    if (!out_buf) {
-        flb_plg_error(ctx->ins, "error formatting JSON payload");
-        return -1;
-    }
-
-    *out_data = out_buf;
-    *out_size = flb_sds_len(out_buf);
-
-    return 0;
-}*/
 
 static int azure_kusto_format(struct flb_azure_kusto *ctx, const char *tag, int tag_len,
                               const void *data, size_t bytes, void **out_data,
@@ -863,59 +694,6 @@ static void flush_init(void *out_context, struct flb_config *config)
     }
 }
 
-static void remove_brackets_sds(flb_sds_t *data) {
-    size_t len = flb_sds_len(*data);
-
-    if (len >= 2 && (*data)[0] == '[' && (*data)[len - 1] == ']') {
-        // Shift the characters to the left by one position
-        memmove(*data, *data + 1, len - 2);
-        // Set the new length, removing the two bracket characters
-        flb_sds_len_set(*data, len - 2);
-        // Append a comma to the end of the modified string
-        *data = flb_sds_cat(*data, ",", 1);
-        if (*data == NULL) {
-            // Handle possible reallocation failure
-            return;
-        }
-    }
-}
-
-int lock_and_delete(const char *filePath) {
-    // Open the file
-    int fd = open(filePath, O_RDWR);
-    if (fd == -1) {
-        perror("Failed to open file");
-        return -1;
-    }
-
-    // Acquire an exclusive lock on the file
-    if (flock(fd, LOCK_EX) == -1) {
-        perror("Failed to lock file");
-        close(fd);
-        return -1;
-    }
-
-    // Perform file deletion
-    if (unlink(filePath) == -1) {
-        perror("Failed to delete file");
-        // Release the lock before returning
-        flock(fd, LOCK_UN);
-        close(fd);
-        return -1;
-    }
-
-    // Release the lock
-    if (flock(fd, LOCK_UN) == -1) {
-        perror("Failed to unlock file");
-        close(fd);
-        return -1;
-    }
-
-    // Close the file descriptor
-    close(fd);
-    return 0;
-}
-
 static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                  struct flb_output_flush *out_flush,
                                  struct flb_input_instance *i_ins, void *out_context,
@@ -945,11 +723,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         flush_init(ctx,config);
 
-        /*if (pthread_mutex_lock(&ctx->buffer_mutex)) {
-            flb_plg_error(ctx->ins, "error locking mutex");
-            FLB_OUTPUT_RETURN(FLB_ERROR);
-        }*/
-
         /* Reformat msgpack to JSON payload */
         ret = azure_kusto_format(ctx, event_chunk->tag, tag_len, event_chunk->data,
                                  event_chunk->size, (void **)&json, &json_size);
@@ -957,39 +730,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             flb_plg_error(ctx->ins, "cannot reformat data into json");
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
-
-        /* Check if the JSON data is an array and valid json*/
-        /*cJSON *root = cJSON_ParseWithLength((char*)json,json_size);
-        if (root == NULL) {
-            flb_plg_error(ctx->ins, "JSON parse error occurred for tag %s", event_chunk->tag);
-            const char *error_ptr = cJSON_GetErrorPtr();
-            if (error_ptr != NULL) {
-                flb_plg_error(ctx->ins, "JSON parse error before: %s", error_ptr);
-            }
-            flb_sds_destroy(json);
-            cJSON_Delete(root);
-            FLB_OUTPUT_RETURN(FLB_ERROR);
-        }
-
-        cJSON_Delete(root);*/
-
-        /*if (json_size >= 2 && json[0] == '[' && json[json_size - 1] == ']') {
-            // Reduce 'bytes' by 1 to remove the ']' at the end
-            json_size--;
-
-            // Perform the shift to remove the '[' at the beginning
-            memmove(json, json + 1, json_size - 2);
-            json_size--;  // Adjust bytes to account for the removal of '['
-
-            // Set the new length of the data string
-            flb_sds_len_set(json, json_size);
-
-            // Add a comma to the end
-            json = flb_sds_cat(json, ",", 1);
-            json_size = flb_sds_len(json);
-        }else{
-            flb_plg_warn(ctx->ins, "data from event chunk is not an json array or empty in json chunk %s", event_chunk->tag);
-        }*/
 
         /* Get a file candidate matching the given 'tag' */
         upload_file = azure_kusto_store_file_get(ctx,
@@ -1018,11 +758,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                          event_chunk->tag);
             total_file_size_check = FLB_TRUE;
         }
-
-        /*if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
-            flb_plg_error(ctx->ins, "error unlocking mutex");
-            FLB_OUTPUT_RETURN(FLB_ERROR);
-        }*/
 
         /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
         if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
@@ -1060,11 +795,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             }else{
                 flb_plg_error(ctx->ins, "unable to ingest file ");
                 flb_sds_destroy(json);
-                // *** RELEASE THE LOCK HERE ***
-                /*if (flock(upload_file->lock_fd, LOCK_UN) == -1) {
-                    flb_plg_error(ctx->ins, "Failed to unlock file '%s': %s", upload_file->fsf->name, strerror(errno));
-                }*/
-                //close(upload_file->lock_fd);
                 FLB_OUTPUT_RETURN(FLB_ERROR);
             }
         }

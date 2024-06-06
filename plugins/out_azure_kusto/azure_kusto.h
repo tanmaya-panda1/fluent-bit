@@ -141,7 +141,6 @@ struct flb_azure_kusto {
     struct flb_fstore *fs;
     struct flb_fstore_stream *stream_active;  /* default active stream */
     struct flb_fstore_stream *stream_upload;
-    struct flb_fstore_stream *stream_metadata; /* metadata stream */
 
 
     /* Upstream connection to the backend server */
@@ -152,32 +151,6 @@ struct flb_azure_kusto {
 
     /* Plugin output instance reference */
     struct flb_output_instance *ins;
-};
-
-/*  Buffer file metadata
- * This structure is used to store metadata about the buffer files that are
- * created by the Azure Kusto plugin. This metadata is used to track the
- * status of the buffer files and to determine if they are ready to be ingested into Azure Kusto
- */
-struct flb_azure_buffer_file_metadata {
-
-    /* The path to the buffer file */
-    char *file_path;
-    /* The time the buffer file was created */
-    time_t created_time;
-    /* The time the buffer file was last modified */
-    time_t last_modified_time;
-    /* The size of the buffer file */
-    size_t file_size;
-    /* This indicates the failure status of the ingested file */
-    int failure_status;
-    flb_sds_t event_tag;
-    int tag_len;
-
-    /* This indicates whether the file is currently accessed */
-    int locked;
-
-    struct mk_list _head;
 };
 
 flb_sds_t get_azure_kusto_token(struct flb_azure_kusto *ctx);
