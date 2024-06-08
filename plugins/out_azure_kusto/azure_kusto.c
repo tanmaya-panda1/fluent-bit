@@ -380,18 +380,26 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
                                const char *tag, int tag_len)
 {
     int ret;
-    char *buffer;
-    size_t buffer_size;
+    char *buffer = NULL;
+    size_t buffer_size = 0;
     struct flb_azure_kusto *ctx = out_context;
-    flb_sds_t payload;
-    flb_sds_t tag_sds = flb_sds_create_len(tag, tag_len);
+    flb_sds_t payload = NULL;
+    flb_sds_t tag_sds = NULL;
     void *final_payload = NULL;
     size_t final_payload_size = 0;
     int is_compressed = FLB_FALSE;
+    int result = 0;
 
     if (pthread_mutex_lock(&ctx->buffer_mutex)) {
-        flb_plg_error(ctx->ins, "error unlocking mutex");
+        flb_plg_error(ctx->ins, "error locking mutex");
         return -1;
+    }
+
+    tag_sds = flb_sds_create_len(tag, tag_len);
+    if (tag_sds == NULL) {
+        flb_plg_error(ctx->ins, "error creating tag_sds");
+        result = -1;
+        goto cleanup;
     }
 
     /* Create buffer */
@@ -399,31 +407,31 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
     if (ret < 0) {
         flb_plg_error(ctx->ins, "Could not construct request buffer for %s",
                       upload_file->fsf->name);
-        return -1;
+        result = -1;
+        goto cleanup;
     }
 
     payload = flb_sds_create_len(buffer, buffer_size);
     flb_free(buffer);
+    buffer = NULL;
 
-    /* modify the payload to add brackets and remove trailing comma to make a json array ready for ingestion */
-    //add_brackets_sds(&payload);
-
+    if (payload == NULL) {
+        flb_plg_error(ctx->ins, "error creating payload sds");
+        result = -1;
+        goto cleanup;
+    }
 
     /* Compress the JSON payload */
     if (ctx->compression_enabled == FLB_TRUE) {
-        ret = flb_gzip_compress((void *) payload, flb_sds_len(payload),
+        ret = flb_gzip_compress((void *)payload, flb_sds_len(payload),
                                 &final_payload, &final_payload_size);
         if (ret != 0) {
-            flb_plg_error(ctx->ins,
-                          "cannot gzip payload");
-            flb_sds_destroy(payload);
-            pthread_mutex_unlock(&ctx->buffer_mutex);
-            return -1;
-        }
-        else {
+            flb_plg_error(ctx->ins, "cannot gzip payload");
+            result = -1;
+            goto cleanup;
+        } else {
             is_compressed = FLB_TRUE;
             flb_plg_debug(ctx->ins, "enabled payload gzip compression");
-            /* JSON buffer will be cleared at cleanup: */
         }
     } else {
         final_payload = payload;
@@ -432,26 +440,38 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
 
     if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
         flb_plg_error(ctx->ins, "error unlocking mutex");
-        return -1;
+        result = -1;
+        goto cleanup;
     }
 
     // Call azure_kusto_queued_ingestion to ingest the payload
     ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), final_payload, final_payload_size);
     if (ret != 0) {
         flb_plg_error(ctx->ins, "Failed to ingest data to Azure Blob");
-        flb_sds_destroy(tag_sds);
-        flb_sds_destroy(payload);
-        return -1;
+        result = -1;
+        goto cleanup;
+    }else{
+        flb_plg_trace(ctx->ins, "Successfully ingested data ");
+        result = 0;
+        goto cleanup;
     }
 
-    flb_sds_destroy(tag_sds);
-    flb_sds_destroy(payload);
-    /* release compressed payload */
-    if (is_compressed == FLB_TRUE) {
+    cleanup:
+    if (tag_sds != NULL) {
+        flb_sds_destroy(tag_sds);
+    }
+    if (payload != NULL && !is_compressed) {
+        flb_sds_destroy(payload);
+    }
+    if (is_compressed && final_payload != NULL) {
         flb_free(final_payload);
     }
+    if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
+        flb_plg_error(ctx->ins, "error unlocking mutex");
+        result = -1;
+    }
 
-    return 0;
+    return result;
 }
 
 
@@ -694,13 +714,22 @@ static void flush_init(void *out_context, struct flb_config *config)
     }
 }
 
+void free_azure_kusto_file(struct azure_kusto_file *file) {
+    if (file == NULL) {
+        return;
+    }
+
+    // Free the structure itself
+    flb_free(file);
+}
+
 static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                  struct flb_output_flush *out_flush,
                                  struct flb_input_instance *i_ins, void *out_context,
                                  struct flb_config *config)
 {
     int ret;
-    flb_sds_t json;
+    flb_sds_t json = NULL;
     size_t json_size;
     size_t tag_len;
     struct flb_azure_kusto *ctx = out_context;
@@ -715,47 +744,40 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
     void *final_payload = NULL;
     size_t final_payload_size = 0;
 
-    flb_plg_trace(ctx->ins, "flushing bytes for event tag %s and size %zu", event_chunk->tag ,event_chunk->size);
+    flb_plg_trace(ctx->ins, "flushing bytes for event tag %s and size %zu", event_chunk->tag, event_chunk->size);
 
     tag_len = flb_sds_len(event_chunk->tag);
 
     if (ctx->buffering_enabled == FLB_TRUE) {
 
-        flush_init(ctx,config);
+        flush_init(ctx, config);
 
         /* Reformat msgpack to JSON payload */
-        ret = azure_kusto_format(ctx, event_chunk->tag, tag_len, event_chunk->data,
-                                 event_chunk->size, (void **)&json, &json_size);
+        ret = azure_kusto_format(ctx, event_chunk->tag, tag_len, event_chunk->data, event_chunk->size, (void **)&json, &json_size);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "cannot reformat data into json");
-            FLB_OUTPUT_RETURN(FLB_RETRY);
+            goto retry;
         }
 
         /* Get a file candidate matching the given 'tag' */
-        upload_file = azure_kusto_store_file_get(ctx,
-                                        event_chunk->tag,
-                                                 tag_len);
+        upload_file = azure_kusto_store_file_get(ctx, event_chunk->tag, tag_len);
 
         /* Discard upload_file if it has failed to upload MAX_UPLOAD_ERRORS times */
         if (upload_file != NULL && upload_file->failures >= MAX_UPLOAD_ERRORS) {
-            flb_plg_warn(ctx->ins, "File with tag %s failed to send %d times, will not "
-                                   "retry", event_chunk->tag, MAX_UPLOAD_ERRORS);
+            flb_plg_warn(ctx->ins, "File with tag %s failed to send %d times, will not retry", event_chunk->tag, MAX_UPLOAD_ERRORS);
             azure_kusto_store_file_inactive(ctx, upload_file);
             upload_file = NULL;
         }
 
         /* If upload_timeout has elapsed, upload file */
-        if (upload_file != NULL && time(NULL) >
-                                   (upload_file->create_time + ctx->upload_timeout)) {
+        if (upload_file != NULL && time(NULL) > (upload_file->create_time + ctx->upload_timeout)) {
             upload_timeout_check = FLB_TRUE;
-            flb_plg_trace(ctx->ins, "upload_timeout reached for %s",
-                         event_chunk->tag);
+            flb_plg_trace(ctx->ins, "upload_timeout reached for %s", event_chunk->tag);
         }
 
         /* If total_file_size has been reached, upload file */
         if (upload_file && upload_file->size + json_size > ctx->file_size) {
-            flb_plg_trace(ctx->ins, "total_file_size exceeded %s",
-                         event_chunk->tag);
+            flb_plg_trace(ctx->ins, "total_file_size exceeded %s", event_chunk->tag);
             total_file_size_check = FLB_TRUE;
         }
 
@@ -766,72 +788,63 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             ret = azure_kusto_load_ingestion_resources(ctx, config);
             if (ret != 0) {
                 flb_plg_error(ctx->ins, "cannot load ingestion resources");
-                FLB_OUTPUT_RETURN(FLB_RETRY);
+                goto retry;
             }
 
             /* Send upload directly without upload queue */
-            ret = ingest_to_kusto_ext(ctx, json, upload_file,
-                                      event_chunk->tag,
-                                      flb_sds_len(event_chunk->tag));
-            if (ret == 0){
+            ret = ingest_to_kusto_ext(ctx, json, upload_file, event_chunk->tag, flb_sds_len(event_chunk->tag));
+            if (ret == 0) {
                 if (pthread_mutex_lock(&ctx->buffer_mutex)) {
                     flb_plg_error(ctx->ins, "error locking mutex");
-                    FLB_OUTPUT_RETURN(FLB_ERROR);
+                    goto error;
                 }
                 ret = azure_kusto_store_file_delete(ctx, upload_file);
                 if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
                     flb_plg_error(ctx->ins, "error unlocking mutex");
-                    FLB_OUTPUT_RETURN(FLB_ERROR);
+                    goto error;
                 }
-                if (ret != 0){
+                if (ret != 0) {
                     flb_plg_error(ctx->ins, "file is ingested but unable to delete it %s with size %zu", upload_file->fsf->name, upload_file->size);
-                    flb_sds_destroy(json);
-                    FLB_OUTPUT_RETURN(FLB_ERROR);
-                } else{
+                    goto error;
+                } else {
                     flb_plg_debug(ctx->ins, "successfully ingested & deleted file %s with size %zu", upload_file->fsf->name, upload_file->size);
-                    flb_sds_destroy(json);
-                    FLB_OUTPUT_RETURN(FLB_OK);
+                    goto cleanup;
                 }
-            }else{
-                flb_plg_error(ctx->ins, "unable to ingest file ");
-                flb_sds_destroy(json);
-                FLB_OUTPUT_RETURN(FLB_ERROR);
+            } else {
+                flb_plg_error(ctx->ins, "unable to ingest file");
+                goto error;
             }
         }
 
         if (pthread_mutex_lock(&ctx->buffer_mutex)) {
             flb_plg_error(ctx->ins, "error locking mutex");
-            FLB_OUTPUT_RETURN(FLB_ERROR);
+            goto error;
         }
 
         /* Buffer current chunk in filesystem and wait for next chunk from engine */
-        ret = buffer_chunk(ctx, upload_file, json, json_size,
-                           event_chunk->tag, flb_sds_len(event_chunk->tag));
+        ret = buffer_chunk(ctx, upload_file, json, json_size, event_chunk->tag, flb_sds_len(event_chunk->tag));
 
         if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
             flb_plg_error(ctx->ins, "error unlocking mutex");
-            FLB_OUTPUT_RETURN(FLB_ERROR);
+            goto error;
         }
 
         if (ret == 0) {
             flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
-            flb_sds_destroy(json);
-            FLB_OUTPUT_RETURN(FLB_OK);
+            goto cleanup;
         } else {
             flb_plg_error(ctx->ins, "failed to buffer chunk %s", event_chunk->tag);
-            flb_sds_destroy(json);
-            FLB_OUTPUT_RETURN(FLB_RETRY);
+            goto retry;
         }
 
     } else {
         /* Buffering mode is disabled, proceed with regular flush */
 
         /* Reformat msgpack to JSON payload */
-        ret = azure_kusto_format(ctx, event_chunk->tag, tag_len, event_chunk->data,
-                                 event_chunk->size, (void **)&json, &json_size);
+        ret = azure_kusto_format(ctx, event_chunk->tag, tag_len, event_chunk->data, event_chunk->size, (void **)&json, &json_size);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "cannot reformat data into json");
-            FLB_OUTPUT_RETURN(FLB_RETRY);
+            goto retry;
         }
 
         flb_plg_trace(ctx->ins, "payload size before compression %zu", json_size);
@@ -839,18 +852,13 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         final_payload = json;
         final_payload_size = json_size;
         if (ctx->compression_enabled == FLB_TRUE) {
-            ret = flb_gzip_compress((void *) json, json_size,
-                                    &final_payload, &final_payload_size);
+            ret = flb_gzip_compress((void *)json, json_size, &final_payload, &final_payload_size);
             if (ret != 0) {
-                flb_plg_error(ctx->ins,
-                              "cannot gzip payload");
-                flb_sds_destroy(json);
-                FLB_OUTPUT_RETURN(FLB_RETRY);
-            }
-            else {
+                flb_plg_error(ctx->ins, "cannot gzip payload");
+                goto retry;
+            } else {
                 is_compressed = FLB_TRUE;
                 flb_plg_debug(ctx->ins, "enabled payload gzip compression");
-                /* JSON buffer will be cleared at cleanup: */
             }
         }
         flb_plg_trace(ctx->ins, "payload size after compression %zu", final_payload_size);
@@ -860,29 +868,63 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         flb_plg_trace(ctx->ins, "after flushing bytes xxxx  %d", ret);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "cannot load ingestion resources");
-            flb_sds_destroy(json);
-            FLB_OUTPUT_RETURN(FLB_RETRY);
+            goto retry;
         }
 
         ret = azure_kusto_queued_ingestion(ctx, event_chunk->tag, tag_len, final_payload, final_payload_size);
-        flb_plg_trace(ctx->ins, "after kusto queued ingestion %d", ret);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "cannot perform queued ingestion");
-            flb_sds_destroy(json);
-            FLB_OUTPUT_RETURN(FLB_RETRY);
+            goto retry;
+        }else{
+            flb_plg_trace(ctx->ins, "successfully ingested %d", ret);
+            goto cleanup;
         }
-
-        /* Cleanup */
-        flb_sds_destroy(json);
-
-        /* release compressed payload */
-        if (is_compressed == FLB_TRUE) {
-            flb_free(final_payload);
-        }
-
-        /* Done */
-        FLB_OUTPUT_RETURN(FLB_OK);
     }
+
+    cleanup:
+    if (json != NULL) {
+        flb_sds_destroy(json);
+    }
+
+    if (is_compressed && final_payload != NULL) {
+        flb_free(final_payload);
+    }
+
+    if (upload_file != NULL) {
+        free_azure_kusto_file(upload_file);
+    }
+
+    FLB_OUTPUT_RETURN(FLB_OK);
+
+    retry:
+    if (json != NULL) {
+        flb_sds_destroy(json);
+    }
+
+    if (is_compressed && final_payload != NULL) {
+        flb_free(final_payload);
+    }
+
+    if (upload_file != NULL) {
+        free_azure_kusto_file(upload_file);
+    }
+
+    FLB_OUTPUT_RETURN(FLB_RETRY);
+
+    error:
+    if (json != NULL) {
+        flb_sds_destroy(json);
+    }
+
+    if (is_compressed && final_payload != NULL) {
+        flb_free(final_payload);
+    }
+
+    if (upload_file != NULL) {
+        free_azure_kusto_file(upload_file);
+    }
+
+    FLB_OUTPUT_RETURN(FLB_ERROR);
 }
 
 

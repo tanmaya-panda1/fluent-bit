@@ -151,6 +151,7 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         ret = flb_fstore_file_meta_set(ctx->fs, fsf, (char *) tag, tag_len);
         if (ret == -1) {
             flb_plg_warn(ctx->ins, "Deleting buffer file because metadata could not be written");
+            flb_sds_destroy(name);
             flb_fstore_file_delete(ctx->fs, fsf);
             return -1;
         }
@@ -160,6 +161,7 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         if (!azure_kusto_file) {
             flb_errno();
             flb_plg_warn(ctx->ins, "Deleting buffer file because azure_kusto context creation failed");
+            flb_sds_destroy(name);
             flb_fstore_file_delete(ctx->fs, fsf);
             return -1;
         }
@@ -180,14 +182,19 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
 
     if (ret != 0) {
         flb_plg_error(ctx->ins, "error writing data to local azure_kusto file");
+        // Clean up if appending data fails
+        if (azure_kusto_file->size == 0) {
+            flb_fstore_file_delete(ctx->fs, fsf);
+            flb_free(azure_kusto_file);
+        }
         return -1;
     }
 
     azure_kusto_file->size += bytes;
     ctx->current_buffer_size += bytes;
 
-    flb_plg_debug(ctx->ins, "[azure_kusto] new file size: %zu", azure_kusto_file->size);
-    flb_plg_debug(ctx->ins, "[azure_kusto] current_buffer_size: %zu", ctx->current_buffer_size);
+    flb_plg_trace(ctx->ins, "[azure_kusto] new file size: %zu", azure_kusto_file->size);
+    flb_plg_trace(ctx->ins, "[azure_kusto] current_buffer_size: %zu", ctx->current_buffer_size);
 
     /* if buffer is 95% full, warn user */
     if (ctx->store_dir_limit_size > 0) {

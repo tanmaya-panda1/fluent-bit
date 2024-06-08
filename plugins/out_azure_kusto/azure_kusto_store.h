@@ -31,7 +31,6 @@ struct azure_kusto_file {
     size_t size;                     /* file size */
     time_t create_time;              /* creation time */
     flb_sds_t file_path;             /* file path */
-    int lock_fd;                     // File descriptor for locking
     struct flb_fstore_file *fsf;     /* reference to parent flb_fstore_file */
 };
 
