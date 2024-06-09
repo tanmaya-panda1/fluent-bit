@@ -419,7 +419,14 @@ int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kust
         flb_plg_warn(ctx->ins, "The file might have been already deleted by another process");
     }
 
-    flb_free(azure_kusto_file);
+    // Check if azure_kusto_file is not NULL before freeing
+    if (azure_kusto_file != NULL) {
+        flb_plg_debug(ctx->ins, "Freeing memory for azure_kusto_file at address: %p", (void *)azure_kusto_file);
+        flb_free(azure_kusto_file);
+        azure_kusto_file = NULL; // Set pointer to NULL after freeing
+    } else {
+        flb_plg_warn(ctx->ins, "Skipped freeing as azure_kusto_file is already NULL");
+    }
 
     return 0;
 }
