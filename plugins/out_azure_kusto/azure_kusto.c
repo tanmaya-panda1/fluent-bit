@@ -806,14 +806,14 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                     flb_plg_error(ctx->ins, "file is ingested but unable to delete it %s with size %zu", upload_file->fsf->name, upload_file->size);
                     flb_plg_debug(ctx->ins, "Freeing memory for azure_kusto_file at address: %p", (void *)upload_file);
                     azure_kusto_file_cleanup(upload_file);
-                    azure_kusto_file = NULL; // Set pointer to NULL after freeing
+                    upload_file = NULL; // Set pointer to NULL after freeing
                     flb_sds_destroy(json);
                     FLB_OUTPUT_RETURN(FLB_ERROR);
                 } else{
                     flb_plg_debug(ctx->ins, "successfully ingested & deleted file %s with size %zu", upload_file->fsf->name, upload_file->size);
                     flb_plg_debug(ctx->ins, "Freeing memory for azure_kusto_file at address: %p", (void *)upload_file);
                     azure_kusto_file_cleanup(upload_file);
-                    azure_kusto_file = NULL; // Set pointer to NULL after freeing
+                    upload_file = NULL; // Set pointer to NULL after freeing
                     flb_sds_destroy(json);
                     FLB_OUTPUT_RETURN(FLB_OK);
                 }
