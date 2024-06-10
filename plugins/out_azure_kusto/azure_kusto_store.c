@@ -431,25 +431,6 @@ int azure_kusto_store_file_inactive(struct flb_azure_kusto *ctx, struct azure_ku
     return ret;
 }
 
-void azure_kusto_file_cleanup(struct azure_kusto_file *file)
-{
-    if (file == NULL) {
-        return;
-    }
-
-    // Free the file path if it was dynamically allocated
-    if (file->file_path != NULL) {
-        flb_sds_destroy(file->file_path);
-        file->file_path = NULL;
-    }
-
-    // If there are other dynamically allocated members, free them here
-    // For now, we only free file_path as per the given struct
-
-    // Free the azure_kusto_file itself
-    flb_free(file);
-}
-
 int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file)
 {
     int ret;
@@ -481,7 +462,7 @@ int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kust
 
         ctx->current_buffer_size -= azure_kusto_file->size;
 
-        // Generate a temporary filename for atomic renaming
+        /*// Generate a temporary filename for atomic renaming
         snprintf(tmp_filename, sizeof(tmp_filename), "%s.tmp", azure_kusto_file->file_path);
 
         // Atomically rename the file to a temporary filename
@@ -491,7 +472,7 @@ int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kust
             flock(fd, LOCK_UN); // Unlock the file
             close(fd);
             return -1;
-        }
+        }*/
 
         // Permanent deletion
         ret = flb_fstore_file_delete(ctx->fs, fsf);
@@ -506,10 +487,6 @@ int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kust
         // Unlock the file and close the file descriptor
         flock(fd, LOCK_UN);
         close(fd);
-
-        flb_plg_debug(ctx->ins, "Freeing memory for azure_kusto_file at address: %p", (void *)azure_kusto_file);
-        azure_kusto_file_cleanup(azure_kusto_file);
-        azure_kusto_file = NULL; // Set pointer to NULL after freeing
     } else {
         flb_plg_warn(ctx->ins, "The file might have been already deleted by another process");
         ret = 0;
