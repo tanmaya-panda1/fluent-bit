@@ -399,8 +399,7 @@ static flb_sds_t parse_ingestion_identity_token(struct flb_azure_kusto *ctx,
             identity_token = flb_sds_create_len(token_str, token_str_len);
 
             if (identity_token) {
-                flb_plg_debug(ctx->ins, "parsed kusto identity token: '%s'",
-                              identity_token);
+                flb_plg_debug(ctx->ins, "parsed kusto identity token ");
             }
             else {
                 flb_plg_error(ctx->ins, "error parsing kusto identity token");

@@ -21,6 +21,8 @@
 #include <fluent-bit/flb_output_plugin.h>
 #include <fluent-bit/flb_fstore.h>
 #include <fluent-bit/flb_time.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 /*
  * Simple and fast hashing algorithm to create keys in the local buffer
@@ -121,6 +123,7 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
     flb_sds_t name;
     struct flb_fstore_file *fsf;
     size_t space_remaining;
+    flb_sds_t path_sds;
 
     if (ctx->store_dir_limit_size > 0 && ctx->current_buffer_size + bytes >= ctx->store_dir_limit_size) {
         flb_plg_error(ctx->ins, "Buffer is full: current_buffer_size=%zu, new_data=%zu, store_dir_limit_size=%zu bytes",
@@ -166,6 +169,36 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         azure_kusto_file->fsf = fsf;
         azure_kusto_file->create_time = time(NULL);
         azure_kusto_file->size = 0; // Initialize size to 0
+
+        path_sds = flb_sds_create(ctx->stream_active->path);
+        if (path_sds == NULL) {
+            flb_plg_error(ctx->ins, "failed to create path_sds");
+            flb_free(azure_kusto_file);
+            flb_fstore_file_delete(ctx->fs, fsf);
+            return -1;
+        }
+
+        // Append a slash ("/") to the path
+        path_sds = flb_sds_cat(path_sds, "/", 1);
+        if (path_sds == NULL) {
+            flb_plg_error(ctx->ins, "failed to append '/' to path_sds");
+            flb_sds_destroy(path_sds);
+            flb_free(azure_kusto_file);
+            flb_fstore_file_delete(ctx->fs, fsf);
+            return -1;
+        }
+
+        // Append the fileName to the path
+        path_sds = flb_sds_cat(path_sds, azure_kusto_file->fsf->name, flb_sds_len(azure_kusto_file->fsf->name));
+        if (path_sds == NULL) {
+            flb_plg_error(ctx->ins, "failed to append file name to path_sds");
+            flb_sds_destroy(path_sds);
+            flb_free(azure_kusto_file);
+            flb_fstore_file_delete(ctx->fs, fsf);
+            return -1;
+        }
+
+        azure_kusto_file->file_path = path_sds;
 
         /* Use fstore opaque 'data' reference to keep our context */
         fsf->data = azure_kusto_file;
@@ -398,7 +431,94 @@ int azure_kusto_store_file_inactive(struct flb_azure_kusto *ctx, struct azure_ku
     return ret;
 }
 
+void azure_kusto_file_cleanup(struct azure_kusto_file *file)
+{
+    if (file == NULL) {
+        return;
+    }
+
+    // Free the file path if it was dynamically allocated
+    if (file->file_path != NULL) {
+        flb_sds_destroy(file->file_path);
+        file->file_path = NULL;
+    }
+
+    // If there are other dynamically allocated members, free them here
+    // For now, we only free file_path as per the given struct
+
+    // Free the azure_kusto_file itself
+    flb_free(file);
+}
+
 int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file)
+{
+    int ret;
+    struct flb_fstore_file *fsf;
+    char tmp_filename[PATH_MAX];
+    int fd;
+
+    fsf = azure_kusto_file->fsf;
+    if (fsf != NULL) {
+        // Open the file for locking
+        fd = open(azure_kusto_file->file_path, O_RDWR);
+        if (fd == -1) {
+            flb_plg_error(ctx->ins, "Failed to open file '%s' for locking: %s", azure_kusto_file->file_path, strerror(errno));
+            return -1;
+        }
+
+        // Lock the file
+        if (flock(fd, LOCK_EX | LOCK_NB) == -1) {
+            if (errno == EWOULDBLOCK) {
+                flb_plg_warn(ctx->ins, "File '%s' is locked by another process, skipping deletion", azure_kusto_file->file_path);
+                close(fd);
+                return 0;
+            } else {
+                flb_plg_error(ctx->ins, "Failed to lock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
+                close(fd);
+                return -1;
+            }
+        }
+
+        ctx->current_buffer_size -= azure_kusto_file->size;
+
+        // Generate a temporary filename for atomic renaming
+        snprintf(tmp_filename, sizeof(tmp_filename), "%s.tmp", azure_kusto_file->file_path);
+
+        // Atomically rename the file to a temporary filename
+        ret = rename(azure_kusto_file->file_path, tmp_filename);
+        if (ret != 0) {
+            flb_plg_error(ctx->ins, "Failed to rename file '%s' to '%s': %s", azure_kusto_file->file_path, tmp_filename, strerror(errno));
+            flock(fd, LOCK_UN); // Unlock the file
+            close(fd);
+            return -1;
+        }
+
+        // Permanent deletion
+        ret = flb_fstore_file_delete(ctx->fs, fsf);
+        if (ret != 0) {
+            flb_plg_error(ctx->ins, "Failed to delete file '%s': %s", tmp_filename, strerror(errno));
+            ret = -1;
+        } else {
+            flb_plg_debug(ctx->ins, "Deleted file '%s'", azure_kusto_file->file_path);
+            ret = 0;
+        }
+
+        // Unlock the file and close the file descriptor
+        flock(fd, LOCK_UN);
+        close(fd);
+
+        flb_plg_debug(ctx->ins, "Freeing memory for azure_kusto_file at address: %p", (void *)azure_kusto_file);
+        azure_kusto_file_cleanup(azure_kusto_file);
+        azure_kusto_file = NULL; // Set pointer to NULL after freeing
+    } else {
+        flb_plg_warn(ctx->ins, "The file might have been already deleted by another process");
+        ret = 0;
+    }
+
+    return ret;
+}
+
+int azure_kusto_store_file_delete_ext(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file)
 {
     int ret;
     struct flb_fstore_file *fsf;
