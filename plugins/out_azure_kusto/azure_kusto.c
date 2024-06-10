@@ -694,6 +694,25 @@ static void flush_init(void *out_context, struct flb_config *config)
     }
 }
 
+void azure_kusto_file_cleanup(struct azure_kusto_file *file)
+{
+    if (file == NULL) {
+        return;
+    }
+
+    // Free the file path if it was dynamically allocated
+    if (file->file_path != NULL) {
+        flb_sds_destroy(file->file_path);
+        file->file_path = NULL;
+    }
+
+    // If there are other dynamically allocated members, free them here
+    // For now, we only free file_path as per the given struct
+
+    // Free the azure_kusto_file itself
+    flb_free(file);
+}
+
 static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                  struct flb_output_flush *out_flush,
                                  struct flb_input_instance *i_ins, void *out_context,
@@ -784,11 +803,9 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                     FLB_OUTPUT_RETURN(FLB_ERROR);
                 }
                 if (ret != 0){
-                    //flb_plg_error(ctx->ins, "file is ingested but unable to delete it %s with size %zu", upload_file->fsf->name, upload_file->size);
                     flb_sds_destroy(json);
                     FLB_OUTPUT_RETURN(FLB_ERROR);
                 } else{
-                    //flb_plg_debug(ctx->ins, "successfully ingested & deleted file %s with size %zu", upload_file->fsf->name, upload_file->size);
                     flb_sds_destroy(json);
                     FLB_OUTPUT_RETURN(FLB_OK);
                 }
@@ -811,6 +828,11 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
             flb_plg_error(ctx->ins, "error unlocking mutex");
             FLB_OUTPUT_RETURN(FLB_ERROR);
+        }
+
+        // Clean up upload_file if it was allocated and not deleted
+        if (upload_file != NULL) {
+            azure_kusto_file_cleanup(upload_file); // Assuming this function is defined to properly free azure_kusto_file
         }
 
         if (ret == 0) {

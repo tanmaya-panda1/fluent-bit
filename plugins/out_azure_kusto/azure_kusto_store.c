@@ -454,7 +454,6 @@ int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kust
 {
     int ret;
     struct flb_fstore_file *fsf;
-    char tmp_filename[PATH_MAX];
     int fd;
 
     fsf = azure_kusto_file->fsf;
@@ -480,18 +479,6 @@ int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kust
         }
 
         ctx->current_buffer_size -= azure_kusto_file->size;
-
-        /*// Generate a temporary filename for atomic renaming
-        snprintf(tmp_filename, sizeof(tmp_filename), "%s.tmp", azure_kusto_file->file_path);
-
-        // Atomically rename the file to a temporary filename
-        ret = rename(azure_kusto_file->file_path, tmp_filename);
-        if (ret != 0) {
-            flb_plg_error(ctx->ins, "Failed to rename file '%s' to '%s': %s", azure_kusto_file->file_path, tmp_filename, strerror(errno));
-            flock(fd, LOCK_UN); // Unlock the file
-            close(fd);
-            return -1;
-        }*/
 
         // Permanent deletion
         ret = flb_fstore_file_delete(ctx->fs, fsf);
