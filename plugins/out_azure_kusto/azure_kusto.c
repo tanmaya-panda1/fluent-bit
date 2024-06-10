@@ -694,25 +694,6 @@ static void flush_init(void *out_context, struct flb_config *config)
     }
 }
 
-void azure_kusto_file_cleanup(struct azure_kusto_file *file)
-{
-    if (file == NULL) {
-        return;
-    }
-
-    // Free the file path if it was dynamically allocated
-    if (file->file_path != NULL) {
-        flb_sds_destroy(file->file_path);
-        file->file_path = NULL;
-    }
-
-    // If there are other dynamically allocated members, free them here
-    // For now, we only free file_path as per the given struct
-
-    // Free the azure_kusto_file itself
-    flb_free(file);
-}
-
 static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                  struct flb_output_flush *out_flush,
                                  struct flb_input_instance *i_ins, void *out_context,
@@ -832,7 +813,19 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         // Clean up upload_file if it was allocated and not deleted
         if (upload_file != NULL) {
-            azure_kusto_file_cleanup(upload_file); // Assuming this function is defined to properly free azure_kusto_file
+            //azure_kusto_file_cleanup(upload_file); // Assuming this function is defined to properly free azure_kusto_file
+
+            // Free the file path if it was dynamically allocated
+            if (upload_file->file_path != NULL) {
+                flb_sds_destroy(upload_file->file_path);
+                upload_file->file_path = NULL;
+            }
+
+            // If there are other dynamically allocated members, free them here
+            // For now, we only free file_path as per the given struct
+
+            // Free the azure_kusto_file itself
+            flb_free(upload_file);
         }
 
         if (ret == 0) {
