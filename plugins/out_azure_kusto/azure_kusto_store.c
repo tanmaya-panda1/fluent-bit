@@ -431,6 +431,25 @@ int azure_kusto_store_file_inactive(struct flb_azure_kusto *ctx, struct azure_ku
     return ret;
 }
 
+void azure_kusto_file_cleanup(struct azure_kusto_file *file)
+{
+    if (file == NULL) {
+        return;
+    }
+
+    // Free the file path if it was dynamically allocated
+    if (file->file_path != NULL) {
+        flb_sds_destroy(file->file_path);
+        file->file_path = NULL;
+    }
+
+    // If there are other dynamically allocated members, free them here
+    // For now, we only free file_path as per the given struct
+
+    // Free the azure_kusto_file itself
+    flb_free(file);
+}
+
 int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file)
 {
     int ret;
@@ -477,12 +496,16 @@ int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kust
         // Permanent deletion
         ret = flb_fstore_file_delete(ctx->fs, fsf);
         if (ret != 0) {
-            flb_plg_error(ctx->ins, "Failed to delete file '%s': %s", tmp_filename, strerror(errno));
+            flb_plg_error(ctx->ins, "File ingested but Failed to delete file %s with size %zu", azure_kusto_file->file_path, azure_kusto_file->size);
             ret = -1;
         } else {
-            flb_plg_debug(ctx->ins, "Deleted file '%s'", azure_kusto_file->file_path);
+            flb_plg_debug(ctx->ins, "File ingested and Deleted file '%s' and with size %zu", azure_kusto_file->file_path, azure_kusto_file->size);
             ret = 0;
         }
+
+        flb_plg_debug(ctx->ins, "Freeing memory for azure_kusto_file at address: %p", (void *)azure_kusto_file);
+        azure_kusto_file_cleanup(azure_kusto_file);
+        azure_kusto_file = NULL; // Set pointer to NULL after freeing
 
         // Unlock the file and close the file descriptor
         flock(fd, LOCK_UN);
