@@ -462,8 +462,8 @@ int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kust
         // Open the file for locking
         fd = open(azure_kusto_file->file_path, O_RDWR);
         if (fd == -1) {
-            flb_plg_error(ctx->ins, "Failed to open file '%s' for locking: %s", azure_kusto_file->file_path, strerror(errno));
-            return -1;
+            flb_plg_error(ctx->ins, "Failed to open file for locking : because it doesnt exist");
+            return 0;
         }
 
         // Lock the file
