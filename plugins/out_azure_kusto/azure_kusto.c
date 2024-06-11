@@ -380,19 +380,20 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
                                const char *tag, int tag_len)
 {
     int ret;
-    char *buffer;
+    char *buffer = NULL;
     size_t buffer_size;
     struct flb_azure_kusto *ctx = out_context;
-    flb_sds_t payload;
-    flb_sds_t tag_sds = flb_sds_create_len(tag, tag_len);
+    flb_sds_t payload = NULL;
+    flb_sds_t tag_sds = NULL;
     void *final_payload = NULL;
     size_t final_payload_size = 0;
     int is_compressed = FLB_FALSE;
 
-    if (pthread_mutex_lock(&ctx->buffer_mutex)) {
+    tag_sds = flb_sds_create_len(tag, tag_len);
+    /*if (pthread_mutex_lock(&ctx->buffer_mutex)) {
         flb_plg_error(ctx->ins, "error unlocking mutex");
         return -1;
-    }
+    }*/
 
     /* Create buffer */
     ret = construct_request_buffer(ctx, new_data, upload_file, &buffer, &buffer_size);
@@ -404,10 +405,6 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
 
     payload = flb_sds_create_len(buffer, buffer_size);
     flb_free(buffer);
-
-    /* modify the payload to add brackets and remove trailing comma to make a json array ready for ingestion */
-    //add_brackets_sds(&payload);
-
 
     /* Compress the JSON payload */
     if (ctx->compression_enabled == FLB_TRUE) {
@@ -430,10 +427,10 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
         final_payload_size = flb_sds_len(payload);
     }
 
-    if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
+    /*if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
         flb_plg_error(ctx->ins, "error unlocking mutex");
         return -1;
-    }
+    }*/
 
     // Call azure_kusto_queued_ingestion to ingest the payload
     ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), final_payload, final_payload_size);
@@ -700,7 +697,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                  struct flb_config *config)
 {
     int ret;
-    flb_sds_t json;
+    flb_sds_t json = NULL;
     size_t json_size;
     size_t tag_len;
     struct flb_azure_kusto *ctx = out_context;
@@ -728,7 +725,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                  event_chunk->size, (void **)&json, &json_size);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "cannot reformat data into json");
-            FLB_OUTPUT_RETURN(FLB_RETRY);
+            FLB_OUTPUT_RETURN(FLB_ERROR);
         }
 
         /* Get a file candidate matching the given 'tag' */
@@ -773,6 +770,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             ret = ingest_to_kusto_ext(ctx, json, upload_file,
                                       event_chunk->tag,
                                       flb_sds_len(event_chunk->tag));
+            flb_sds_destroy(json);
             if (ret == 0){
                 if (pthread_mutex_lock(&ctx->buffer_mutex)) {
                     flb_plg_error(ctx->ins, "error locking mutex");
@@ -784,15 +782,12 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                     FLB_OUTPUT_RETURN(FLB_ERROR);
                 }
                 if (ret != 0){
-                    flb_sds_destroy(json);
                     FLB_OUTPUT_RETURN(FLB_ERROR);
                 } else{
-                    flb_sds_destroy(json);
                     FLB_OUTPUT_RETURN(FLB_OK);
                 }
             }else{
                 flb_plg_error(ctx->ins, "unable to ingest file ");
-                flb_sds_destroy(json);
                 FLB_OUTPUT_RETURN(FLB_ERROR);
             }
         }
@@ -809,23 +804,6 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
             flb_plg_error(ctx->ins, "error unlocking mutex");
             FLB_OUTPUT_RETURN(FLB_ERROR);
-        }
-
-        // Clean up upload_file if it was allocated and not deleted
-        if (upload_file != NULL) {
-            //azure_kusto_file_cleanup(upload_file); // Assuming this function is defined to properly free azure_kusto_file
-
-            // Free the file path if it was dynamically allocated
-            if (upload_file->file_path != NULL) {
-                flb_sds_destroy(upload_file->file_path);
-                upload_file->file_path = NULL;
-            }
-
-            // If there are other dynamically allocated members, free them here
-            // For now, we only free file_path as per the given struct
-
-            // Free the azure_kusto_file itself
-            flb_free(upload_file);
         }
 
         if (ret == 0) {
