@@ -476,6 +476,7 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
         ctx->retry_time = 0;
         ctx->store_dir_limit_size = FLB_AZURE_KUSTO_BUFFER_DIR_MAX_SIZE;
         ctx->has_old_buffers = azure_kusto_store_has_data(ctx);
+        ctx->timer_created = FLB_FALSE;
 
         /* Initialize local storage */
         int ret = azure_kusto_store_init(ctx);
@@ -671,6 +672,7 @@ static void flush_init(void *out_context, struct flb_config *config)
 {
     int ret;
     struct flb_azure_kusto *ctx = out_context;
+    struct flb_sched *sched;
 
     /* clean up any old buffers found on startup */
     if (ctx->has_old_buffers == FLB_TRUE) {
@@ -688,6 +690,27 @@ static void flush_init(void *out_context, struct flb_config *config)
                           ctx->fs->root_path);
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
+    }
+
+    /*
+     * create a timer that will run periodically and check if uploads
+     * are ready for completion
+     * this is created once on the first flush
+     */
+    if (ctx->timer_created == FLB_FALSE) {
+        ctx->timer_ms = 2*60*1000; /* 2 minutes */
+        flb_plg_debug(ctx->ins,
+                      "Creating upload timer with frequency %ds",
+                      ctx->timer_ms / 1000);
+
+        sched = flb_sched_ctx_get();
+        ret = flb_sched_timer_cb_create(sched, FLB_SCHED_TIMER_CB_PERM,
+                                        ctx->timer_ms, cb_azure_kusto_ingest, ctx, NULL);
+        if (ret == -1) {
+            flb_plg_error(ctx->ins, "Failed to create upload timer");
+            FLB_OUTPUT_RETURN(FLB_RETRY);
+        }
+        ctx->timer_created = FLB_TRUE;
     }
 }
 

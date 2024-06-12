@@ -102,6 +102,9 @@ struct flb_azure_kusto {
     int include_time_key;
     flb_sds_t time_key;
 
+    int timer_created;
+    int timer_ms;
+
     flb_sds_t azure_kusto_buffer_key;
 
     /* --- internal data --- */
