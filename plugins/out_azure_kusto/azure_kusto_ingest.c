@@ -166,7 +166,7 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
     flb_plg_debug(ctx->ins,"inside blob after upstream ha node get  :: setting ingestion timeout");
     if (!u_node->u) {
         flb_plg_error(ctx->ins, "upstream data is null");
-        return -1;
+        return NULL;
     }
     u_conn = flb_upstream_conn_get(u_node->u);
 
@@ -174,7 +174,7 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
     if (u_conn) {
         if (pthread_mutex_lock(&ctx->blob_mutex)) {
             flb_plg_error(ctx->ins, "error unlocking mutex");
-            return -1;
+            goto cleanup;;
         }
 
         flb_plg_debug(ctx->ins,"inside blob before create blob uri");
@@ -182,7 +182,7 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
 
         if (pthread_mutex_unlock(&ctx->blob_mutex)) {
             flb_plg_error(ctx->ins, "error unlocking mutex");
-            return -1;
+            goto cleanup;;
         }
 
         if (uri) {
@@ -247,6 +247,15 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
     }
 
     return uri;
+
+    cleanup:
+        if (u_conn) {
+            flb_upstream_conn_release(u_conn);
+        }
+        if (uri) {
+            flb_sds_destroy(uri);
+        }
+        return NULL;
 }
 
 static flb_sds_t create_ingestion_message(struct flb_azure_kusto *ctx, flb_sds_t blob_uri,
@@ -262,7 +271,7 @@ static flb_sds_t create_ingestion_message(struct flb_azure_kusto *ctx, flb_sds_t
     
     if (pthread_mutex_lock(&ctx->blob_mutex)) {
         flb_plg_error(ctx->ins, "error unlocking mutex");
-        return -1;
+        return NULL;
     }
 
     uuid = generate_uuid();
@@ -274,7 +283,6 @@ static flb_sds_t create_ingestion_message(struct flb_azure_kusto *ctx, flb_sds_t
 	    flb_plg_debug(ctx->ins,"payload size :: %lu",payload_size);
 	    flb_plg_debug(ctx->ins,"database_name :: %s",ctx->database_name);
 	    flb_plg_debug(ctx->ins,"table name :: %s",ctx->table_name);
-	    flb_plg_debug(ctx->ins,"identity token :: %s", ctx->resources->identity_token);
 
         if (message) {
             message_len =
@@ -334,7 +342,7 @@ static flb_sds_t create_ingestion_message(struct flb_azure_kusto *ctx, flb_sds_t
 
     if (pthread_mutex_unlock(&ctx->blob_mutex)) {
         flb_plg_error(ctx->ins, "error unlocking mutex");
-        return -1;
+        return NULL;
     }
 
     return message;
@@ -539,7 +547,7 @@ int azure_kusto_queued_ingestion(struct flb_azure_kusto *ctx, flb_sds_t tag,
 
     if (pthread_mutex_lock(&ctx->blob_mutex)) {
         flb_plg_error(ctx->ins, "error unlocking mutex");
-    	return NULL;
+    	return -1;
     }
 
     /* flb__<db>__<table>__<b64tag>__<timestamp> */
@@ -548,7 +556,7 @@ int azure_kusto_queued_ingestion(struct flb_azure_kusto *ctx, flb_sds_t tag,
     
     if (pthread_mutex_unlock(&ctx->blob_mutex)) {
         flb_plg_error(ctx->ins, "error unlocking mutex");
-    	return NULL;
+    	return -1;
     }
 
     if (blob_id) {
