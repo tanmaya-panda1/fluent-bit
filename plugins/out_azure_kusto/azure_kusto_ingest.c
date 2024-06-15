@@ -209,7 +209,7 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
                 if (ret == 0) {
                     /* Validate return status and HTTP status if set */
                     if (c->resp.status != 201) {
-                        ret = NULL;
+                        ret = -1;
 
                         if (c->resp.payload_size > 0) {
                             flb_plg_debug(ctx->ins, "Request failed and returned: \n%s",
