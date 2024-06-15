@@ -442,8 +442,7 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
     }
 
     if (payload != final_payload) {
-        flb_sds_destroy(payload);
-
+        flb_sds_destroy(final_payload);
     }
     flb_sds_destroy(tag_sds);
     flb_sds_destroy(payload);
