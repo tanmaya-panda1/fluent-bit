@@ -402,10 +402,6 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
                       upload_file->fsf->name);
         return -1;
     }
-    if(new_data){
-        flb_sds_destroy(new_data);
-        new_data = NULL;
-    }
     payload = flb_sds_create_len(buffer, buffer_size);
     flb_free(buffer);
 
@@ -417,6 +413,7 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
             flb_plg_error(ctx->ins,
                           "cannot gzip payload");
             flb_sds_destroy(payload);
+            flb_sds_destroy(tag_sds);
             pthread_mutex_unlock(&ctx->buffer_mutex);
             return -1;
         }
@@ -444,12 +441,13 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
         return -1;
     }
 
+    if (payload != final_payload) {
+        flb_sds_destroy(payload);
+
+    }
     flb_sds_destroy(tag_sds);
     flb_sds_destroy(payload);
-    /* release compressed payload */
-    if (is_compressed == FLB_TRUE) {
-        flb_free(final_payload);
-    }
+
 
     return 0;
 }
