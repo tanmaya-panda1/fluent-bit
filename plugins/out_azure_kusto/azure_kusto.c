@@ -387,6 +387,7 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
     void *final_payload = NULL;
     size_t final_payload_size = 0;
     int is_compressed = FLB_FALSE;
+    flb_sds_t tag_sds = flb_sds_create_len(tag, tag_len);
 
     /*if (pthread_mutex_lock(&ctx->buffer_mutex)) {
         flb_plg_error(ctx->ins, "error unlocking mutex");
@@ -411,6 +412,7 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
             flb_plg_error(ctx->ins,
                           "cannot gzip payload");
             flb_sds_destroy(payload);
+            flb_sds_destroy(tag_sds);
             //pthread_mutex_unlock(&ctx->buffer_mutex);
             return -1;
         }
@@ -432,7 +434,8 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
     // Call azure_kusto_queued_ingestion to ingest the payload
     ret = azure_kusto_queued_ingestion(ctx, tag_sds, tag_len, final_payload, final_payload_size);
     if (ret != 0) {
-        flb_plg_error(ctx->ins, "Failed to ingest data to Azure Blob");
+        flb_plg_error(ctx->ins, "Failed to ingest data to Azure Kusto");
+        flb_sds_destroy(tag_sds);
         flb_sds_destroy(payload);
         if (is_compressed) {
             flb_free(final_payload);
@@ -440,6 +443,7 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
         return -1;
     }
 
+    flb_sds_destroy(tag_sds);
     flb_sds_destroy(payload);
     if (is_compressed) {
         flb_free(final_payload);
