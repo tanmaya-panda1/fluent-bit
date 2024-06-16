@@ -384,12 +384,10 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
     size_t buffer_size;
     struct flb_azure_kusto *ctx = out_context;
     flb_sds_t payload = NULL;
-    flb_sds_t tag_sds = NULL;
     void *final_payload = NULL;
     size_t final_payload_size = 0;
     int is_compressed = FLB_FALSE;
 
-    tag_sds = flb_sds_create_len(tag, tag_len);
     /*if (pthread_mutex_lock(&ctx->buffer_mutex)) {
         flb_plg_error(ctx->ins, "error unlocking mutex");
         return -1;
@@ -413,8 +411,7 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
             flb_plg_error(ctx->ins,
                           "cannot gzip payload");
             flb_sds_destroy(payload);
-            flb_sds_destroy(tag_sds);
-            pthread_mutex_unlock(&ctx->buffer_mutex);
+            //pthread_mutex_unlock(&ctx->buffer_mutex);
             return -1;
         }
         else {
@@ -433,20 +430,20 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
     }*/
 
     // Call azure_kusto_queued_ingestion to ingest the payload
-    ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), final_payload, final_payload_size);
+    ret = azure_kusto_queued_ingestion(ctx, tag_sds, tag_len, final_payload, final_payload_size);
     if (ret != 0) {
         flb_plg_error(ctx->ins, "Failed to ingest data to Azure Blob");
-        flb_sds_destroy(tag_sds);
         flb_sds_destroy(payload);
+        if (is_compressed) {
+            flb_free(final_payload);
+        }
         return -1;
     }
 
-    if (payload != final_payload) {
-        flb_sds_destroy(final_payload);
-    }
-    flb_sds_destroy(tag_sds);
     flb_sds_destroy(payload);
-
+    if (is_compressed) {
+        flb_free(final_payload);
+    }
 
     return 0;
 }
@@ -769,7 +766,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             /* Send upload directly without upload queue */
             ret = ingest_to_kusto_ext(ctx, json, upload_file,
                                       event_chunk->tag,
-                                      flb_sds_len(event_chunk->tag));
+                                      tag_len);
 
             if (ret == 0){
                 if (pthread_mutex_lock(&ctx->buffer_mutex)) {
@@ -807,7 +804,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         /* Buffer current chunk in filesystem and wait for next chunk from engine */
         ret = buffer_chunk(ctx, upload_file, json, json_size,
-                           event_chunk->tag, flb_sds_len(event_chunk->tag));
+                           event_chunk->tag, tag_len);
 
         if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
             flb_plg_error(ctx->ins, "error unlocking mutex");
