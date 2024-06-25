@@ -389,6 +389,11 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
     int is_compressed = FLB_FALSE;
     flb_sds_t tag_sds = flb_sds_create_len(tag, tag_len);
 
+    /*if (pthread_mutex_lock(&ctx->buffer_mutex)) {
+        flb_plg_error(ctx->ins, "error unlocking mutex");
+        return -1;
+    }*/
+
     /* Create buffer */
     ret = construct_request_buffer(ctx, new_data, upload_file, &buffer, &buffer_size);
     if (ret < 0) {
@@ -420,6 +425,11 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
         final_payload = payload;
         final_payload_size = flb_sds_len(payload);
     }
+
+    /*if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
+        flb_plg_error(ctx->ins, "error unlocking mutex");
+        return -1;
+    }*/
 
     // Call azure_kusto_queued_ingestion to ingest the payload
     ret = azure_kusto_queued_ingestion(ctx, tag_sds, tag_len, final_payload, final_payload_size);
