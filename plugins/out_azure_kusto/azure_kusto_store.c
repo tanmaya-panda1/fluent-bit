@@ -447,14 +447,19 @@ void azure_kusto_file_cleanup(struct azure_kusto_file *file)
     // For now, we only free file_path as per the given struct
 
     // Free the azure_kusto_file itself
-    flb_free(file);
+    //flb_free(file);
 }
 
 int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file)
 {
-    int ret;
+    int ret = -1;
     struct flb_fstore_file *fsf;
     int fd;
+
+    if (azure_kusto_file == NULL){
+        flb_plg_warn(ctx->ins, "azure_kusto_file is NULL, skipping deletion");
+        return 0;
+    }
 
     fsf = azure_kusto_file->fsf;
     if (fsf != NULL) {
@@ -492,6 +497,7 @@ int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kust
 
         flb_plg_debug(ctx->ins, "Freeing memory for azure_kusto_file at address: %p", (void *)azure_kusto_file);
         azure_kusto_file_cleanup(azure_kusto_file);
+        flb_free(azure_kusto_file);
         azure_kusto_file = NULL; // Set pointer to NULL after freeing
 
         // Unlock the file and close the file descriptor
