@@ -106,8 +106,6 @@ struct flb_azure_kusto {
 
     /* --- internal data --- */
 
-    flb_sds_t ingestion_mgmt_endpoint;
-
     /* oauth2 context */
     flb_sds_t oauth_url;
     struct flb_oauth2 *o;
@@ -128,7 +126,6 @@ struct flb_azure_kusto {
     int buffering_enabled;
 
     size_t file_size;
-    size_t upload_chunk_size;
     time_t upload_timeout;
     time_t retry_time;
 
