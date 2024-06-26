@@ -464,7 +464,7 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
     time_t now;
 
     int generated_random_integer = azure_kusto_generate_random_integer();
-    flb_plg_debug(ctx->ins, "check if the latest changes are there 1");
+    flb_plg_debug(ctx->ins, "check if the latest changes are there 2");
     flb_plg_debug(ctx->ins, "generated random integer %d", generated_random_integer);
 
     now = time(NULL);
@@ -519,12 +519,23 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
                                 parse_ingestion_identity_token(ctx, response);
 
                             if (identity_token) {
-                                    ctx->resources->blob_ha = blob_ha;
-                                    ctx->resources->queue_ha = queue_ha;
-                                    ctx->resources->identity_token = identity_token;
-                                    ctx->resources->load_time = now;
+                                /* Ensure any previously allocated identity token is freed */
+                                if (ctx->resources->identity_token) {
+                                    flb_sds_destroy(ctx->resources->identity_token);
+                                }
+                                /* Ensure any previously allocated blob_ha and queue_ha are freed */
+                                if (ctx->resources->blob_ha) {
+                                    flb_upstream_ha_destroy(ctx->resources->blob_ha);
+                                }
+                                if (ctx->resources->queue_ha) {
+                                    flb_upstream_ha_destroy(ctx->resources->queue_ha);
+                                }
+                                ctx->resources->blob_ha = blob_ha;
+                                ctx->resources->queue_ha = queue_ha;
+                                ctx->resources->identity_token = identity_token;
+                                ctx->resources->load_time = now;
 
-                                    ret = 0;
+                                ret = 0;
                             }
                             else {
                                 flb_plg_error(ctx->ins,
@@ -706,6 +717,8 @@ int flb_azure_kusto_conf_destroy(struct flb_azure_kusto *ctx)
     if (!ctx) {
         return -1;
     }
+
+    flb_plg_info(ctx->ins, "before exiting the plugin kusto conf destroy called");
 
     if (ctx->oauth_url) {
         flb_sds_destroy(ctx->oauth_url);
