@@ -522,13 +522,16 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
                                 /* Ensure any previously allocated identity token is freed */
                                 if (ctx->resources->identity_token) {
                                     flb_sds_destroy(ctx->resources->identity_token);
+                                    ctx->resources->identity_token = NULL;
                                 }
                                 /* Ensure any previously allocated blob_ha and queue_ha are freed */
                                 if (ctx->resources->blob_ha) {
                                     flb_upstream_ha_destroy(ctx->resources->blob_ha);
+                                    ctx->resources->blob_ha = NULL;
                                 }
                                 if (ctx->resources->queue_ha) {
                                     flb_upstream_ha_destroy(ctx->resources->queue_ha);
+                                    ctx->resources->queue_ha = NULL;
                                 }
                                 ctx->resources->blob_ha = blob_ha;
                                 ctx->resources->queue_ha = queue_ha;
