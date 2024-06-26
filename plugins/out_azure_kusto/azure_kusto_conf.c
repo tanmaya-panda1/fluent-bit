@@ -237,7 +237,7 @@ static int parse_storage_resources(struct flb_azure_kusto *ctx, struct flb_confi
              * values, the first value containing the resource type, and the second value
              * containing the resource uri */
             for (; i < ret; i++) {
-                t = &tokens[i];
+                jsmntok_t *t = &tokens[i];
 
                 /**
                  * each token should be an array with 2 strings:
