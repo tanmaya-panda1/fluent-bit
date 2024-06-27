@@ -456,12 +456,8 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
 static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_config *config,
                                void *data)
 {
-    int type;
     int io_flags = FLB_IO_TLS;
     struct flb_azure_kusto *ctx;
-    struct flb_sched *sched;
-    struct flb_fstore *fs;
-    flb_sds_t tmp_sds;
 
     flb_plg_debug(ins, "inside azure kusto init");
 
