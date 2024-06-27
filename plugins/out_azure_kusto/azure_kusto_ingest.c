@@ -174,7 +174,7 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
     if (u_conn) {
         if (pthread_mutex_lock(&ctx->blob_mutex)) {
             flb_plg_error(ctx->ins, "error unlocking mutex");
-            goto cleanup;;
+            goto cleanup;
         }
 
         flb_plg_debug(ctx->ins,"inside blob before create blob uri");
@@ -182,7 +182,7 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
 
         if (pthread_mutex_unlock(&ctx->blob_mutex)) {
             flb_plg_error(ctx->ins, "error unlocking mutex");
-            goto cleanup;;
+            goto cleanup;
         }
 
         if (uri) {
