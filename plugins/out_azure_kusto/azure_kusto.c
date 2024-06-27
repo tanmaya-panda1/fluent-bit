@@ -554,7 +554,7 @@ static int azure_kusto_format(struct flb_azure_kusto *ctx, const char *tag, int 
     struct flb_log_event_decoder log_decoder;
     struct flb_log_event log_event;
     int ret;
-    flb_sds_t out_buf = NULL;
+    flb_sds_t out_buf;
 
     /* Create array for all records */
     records = flb_mp_count(data, bytes);
@@ -570,7 +570,7 @@ static int azure_kusto_format(struct flb_azure_kusto *ctx, const char *tag, int 
     }
 
     /* Initialize the output buffer */
-    out_buf = flb_sds_create_size(1024 * 2);
+    out_buf = flb_sds_create_size(1024);
     if (!out_buf) {
         flb_plg_error(ctx->ins, "error creating output buffer");
         flb_log_event_decoder_destroy(&log_decoder);
@@ -636,25 +636,8 @@ static int azure_kusto_format(struct flb_azure_kusto *ctx, const char *tag, int 
         }
 
         /* Concatenate the JSON record to the output buffer */
-        /*out_buf = flb_sds_cat(out_buf, json_record, flb_sds_len(json_record));
-        out_buf = flb_sds_cat(out_buf, "\n", 1);*/
-
-        // Concatenate the JSON record to the output buffer
-        if (flb_sds_cat_safe(&out_buf, json_record, flb_sds_len(json_record)) == -1) {
-            // Handle concatenation failure
-            flb_sds_destroy(json_record);
-            flb_sds_destroy(out_buf);
-            return -1;
-        }
-
-// Concatenate a newline character to the output buffer
-        if (flb_sds_cat_safe(&out_buf, "\n", 1) == -1) {
-            // Handle concatenation failure
-            flb_sds_destroy(json_record);
-            flb_sds_destroy(out_buf);
-            return -1;
-        }
-
+        out_buf = flb_sds_cat(out_buf, json_record, flb_sds_len(json_record));
+        out_buf = flb_sds_cat(out_buf, "\n", 1);
         flb_sds_destroy(json_record);
     }
 
