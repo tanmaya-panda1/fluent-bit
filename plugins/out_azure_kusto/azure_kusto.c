@@ -633,17 +633,27 @@ static int azure_kusto_format(struct flb_azure_kusto *ctx, const char *tag, int 
 
         /* Concatenate the JSON record to the output buffer */
         flb_sds_t tmp_buf = flb_sds_cat(out_buf, json_record, flb_sds_len(json_record));
-        if (tmp_buf != out_buf) { // Check if reallocation occurred
-            flb_sds_destroy(out_buf); // Free the old buffer
-            out_buf = tmp_buf; // Update to the new buffer
+        if (!tmp_buf) {
+            flb_plg_error(ctx->ins, "error concatenating JSON record to output buffer");
+            flb_sds_destroy(json_record);
+            flb_sds_destroy(out_buf);
+            msgpack_sbuffer_destroy(&mp_sbuf);
+            flb_log_event_decoder_destroy(&log_decoder);
+            return -1;
         }
+        out_buf = tmp_buf;
+
         tmp_buf = flb_sds_cat(out_buf, "\n", 1);
-        if (tmp_buf != out_buf) { // Check if reallocation occurred
-            flb_sds_destroy(out_buf); // Free the old buffer
-            out_buf = tmp_buf; // Update to the new buffer
+        if (!tmp_buf) {
+            flb_plg_error(ctx->ins, "error concatenating newline to output buffer");
+            flb_sds_destroy(json_record);
+            flb_sds_destroy(out_buf);
+            msgpack_sbuffer_destroy(&mp_sbuf);
+            flb_log_event_decoder_destroy(&log_decoder);
+            return -1;
         }
-        /*out_buf = flb_sds_cat(out_buf, json_record, flb_sds_len(json_record));
-        out_buf = flb_sds_cat(out_buf, "\n", 1);*/
+        out_buf = tmp_buf;
+
         flb_sds_destroy(json_record);
     }
 
