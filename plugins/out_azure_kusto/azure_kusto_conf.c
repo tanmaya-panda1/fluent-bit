@@ -464,7 +464,7 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
     time_t now;
 
     int generated_random_integer = azure_kusto_generate_random_integer();
-    flb_plg_debug(ctx->ins, "check if the latest changes are there 2");
+    flb_plg_debug(ctx->ins, "check if the latest changes are there 3");
     flb_plg_debug(ctx->ins, "generated random integer %d", generated_random_integer);
 
     now = time(NULL);

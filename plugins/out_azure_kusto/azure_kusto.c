@@ -794,9 +794,9 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                     goto cleanup;
                 }
             }else{
-                flb_plg_error(ctx->ins, "unable to ingest file ");
-                ret = FLB_ERROR;
-                goto error;
+                flb_plg_error(ctx->ins, "unable to ingest data into kusto ");
+                ret = FLB_RETRY;
+                goto cleanup;
             }
         }
 
