@@ -242,7 +242,6 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
         }
 
         flb_upstream_conn_release(u_conn);
-        u_conn = NULL;
     }
     else {
         flb_plg_error(ctx->ins, "error getting blob container upstream connection");
