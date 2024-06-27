@@ -138,8 +138,8 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
     flb_sds_t uri = NULL;
     struct flb_upstream_node *u_node;
     struct flb_forward_config *fc = NULL;
-    struct flb_connection *u_conn;
-    struct flb_http_client *c;
+    struct flb_connection *u_conn = NULL;
+    struct flb_http_client *c = NULL;
     size_t resp_size;
     time_t now;
     struct tm tm;
@@ -225,6 +225,7 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
                 }
 
                 flb_http_client_destroy(c);
+                c = NULL;
             }
             else {
                 flb_plg_error(ctx->ins,
@@ -241,6 +242,7 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
         }
 
         flb_upstream_conn_release(u_conn);
+        u_conn = NULL;
     }
     else {
         flb_plg_error(ctx->ins, "error getting blob container upstream connection");
@@ -249,11 +251,17 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
     return uri;
 
     cleanup:
+        if (c) {
+            flb_http_client_destroy(c);
+            c = NULL;
+        }
         if (u_conn) {
             flb_upstream_conn_release(u_conn);
+            u_conn = NULL;
         }
         if (uri) {
             flb_sds_destroy(uri);
+            uri = NULL;
         }
         return NULL;
 }
