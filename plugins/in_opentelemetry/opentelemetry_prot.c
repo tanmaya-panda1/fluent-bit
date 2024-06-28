@@ -103,7 +103,7 @@ static int send_response(struct http_conn *conn, int http_status, char *message)
     }
     else if (http_status == 400) {
         flb_sds_printf(&out,
-                       "HTTP/1.1 400 Forbidden\r\n"
+                       "HTTP/1.1 400 Bad Request\r\n"
                        "Server: Fluent Bit v%s\r\n"
                        "Content-Length: %i\r\n\r\n%s",
                        FLB_VERSION_STR,
@@ -1773,7 +1773,7 @@ int opentelemetry_prot_uncompress(struct mk_http_session *session,
 
 
 /*
- * Handle an incoming request. It perform extra checks over the request, if
+ * Handle an incoming request. It performs extra checks over the request, if
  * everything is OK, it enqueue the incoming payload.
  */
 int opentelemetry_prot_handle(struct flb_opentelemetry *ctx, struct http_conn *conn,
@@ -1820,7 +1820,7 @@ int opentelemetry_prot_handle(struct flb_opentelemetry *ctx, struct http_conn *c
         return -1;
     }
 
-    /* Try to match a query string so we can remove it */
+    /* Try to match a query string, so we can remove it */
     qs = strchr(uri, '?');
     if (qs) {
         /* remove the query string part */
@@ -1963,7 +1963,7 @@ static int send_response_ng(struct flb_http_response *response,
         flb_http_response_set_message(response, "No Content");
     }
     else if (http_status == 400) {
-        flb_http_response_set_message(response, "Forbidden");
+        flb_http_response_set_message(response, "Bad Request");
     }
 
     if (message != NULL) {
@@ -2175,6 +2175,12 @@ static int process_payload_metrics_ng(struct flb_opentelemetry *ctx,
 
     offset = 0;
 
+    if (request->content_type == NULL) {
+        flb_error("[otel] content type missing");
+
+        return -1;
+    }
+
     if (strcasecmp(request->content_type, "application/grpc") == 0) {
         if (cfl_sds_len(request->body) < 5) {
             return -1;
@@ -2185,11 +2191,17 @@ static int process_payload_metrics_ng(struct flb_opentelemetry *ctx,
                                                  cfl_sds_len(request->body) - 5,
                                                  &offset);
     }
-    else {
+    else if (strcasecmp(request->content_type, "application/x-protobuf") == 0 ||
+             strcasecmp(request->content_type, "application/json") == 0) {
         result = cmt_decode_opentelemetry_create(&decoded_contexts,
                                                 request->body,
                                                 cfl_sds_len(request->body),
                                                 &offset);
+    }
+    else {
+        flb_plg_error(ctx->ins, "Unsupported content type %s", request->content_type);
+
+        return -1;
     }
 
     if (result == CMT_DECODE_OPENTELEMETRY_SUCCESS) {
@@ -2204,6 +2216,10 @@ static int process_payload_metrics_ng(struct flb_opentelemetry *ctx,
         }
 
         cmt_decode_opentelemetry_destroy(&decoded_contexts);
+    }
+    else {
+        flb_plg_warn(ctx->ins, "non-success cmetrics opentelemetry decode result %d", result);
+        return -1;
     }
 
     return 0;
@@ -2221,6 +2237,12 @@ static int process_payload_traces_proto_ng(struct flb_opentelemetry *ctx,
 
     offset = 0;
 
+    if (request->content_type == NULL) {
+        flb_error("[otel] content type missing");
+
+        return -1;
+    }
+
     if (strcasecmp(request->content_type, "application/grpc") == 0) {
         if (cfl_sds_len(request->body) < 5) {
             return -1;
@@ -2231,16 +2253,25 @@ static int process_payload_traces_proto_ng(struct flb_opentelemetry *ctx,
                                                  cfl_sds_len(request->body) - 5,
                                                  &offset);
     }
-    else {
+    else if (strcasecmp(request->content_type, "application/x-protobuf") == 0 ||
+             strcasecmp(request->content_type, "application/json") == 0) {
         result = ctr_decode_opentelemetry_create(&decoded_context,
                                                 request->body,
                                                 cfl_sds_len(request->body),
                                                 &offset);
     }
+    else {
+        flb_plg_error(ctx->ins, "Unsupported content type %s", request->content_type);
+
+        return -1;
+    }
 
     if (result == 0) {
         result = flb_input_trace_append(ctx->ins, NULL, 0, decoded_context);
         ctr_decode_opentelemetry_destroy(decoded_context);
+    }
+    else {
+        flb_plg_warn(ctx->ins, "non-success ctraces opentelemetry decode result %d", result);
     }
 
     return result;
@@ -2454,7 +2485,12 @@ int opentelemetry_prot_handle_ng(struct flb_http_request *request,
         send_export_service_response_ng(response, result, payload_type);
     }
     else {
-        send_response_ng(response, context->successful_response_code, NULL);
+        if (result == 0) {
+            send_response_ng(response, context->successful_response_code, NULL);
+        }
+        else {
+            send_response_ng(response, 400, "invalid request: deserialisation error\n");
+        }
     }
 
     return result;
