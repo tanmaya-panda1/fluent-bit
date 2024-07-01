@@ -137,7 +137,7 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
     int ret = -1;
     flb_sds_t uri = NULL;
     struct flb_upstream_node *u_node;
-    struct flb_forward_config *fc = NULL;
+    //struct flb_forward_config *fc = NULL;
     struct flb_connection *u_conn = NULL;
     struct flb_http_client *c = NULL;
     size_t resp_size;
@@ -159,7 +159,7 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
     }
 
     /* Get forward_config stored in node opaque data */
-    fc = flb_upstream_node_get_data(u_node);
+    //fc = flb_upstream_node_get_data(u_node);
 
     flb_plg_debug(ctx->ins,"inside blob after upstream ha node get");
     u_node->u->base.net.connect_timeout = ctx->ingestion_endpoint_connect_timeout;
@@ -225,7 +225,7 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
                 }
 
                 flb_http_client_destroy(c);
-                c = NULL;
+                //c = NULL;
             }
             else {
                 flb_plg_error(ctx->ins,
