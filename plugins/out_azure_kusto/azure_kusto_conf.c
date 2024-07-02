@@ -70,7 +70,7 @@ static struct flb_upstream_node *flb_upstream_node_create_url(struct flb_azure_k
 
             if (ret != -1) {
                 ret = flb_hash_table_add(kv, AZURE_KUSTO_RESOURCE_UPSTREAM_SAS, 3, tmp + 1,
-                                   sas_length);
+                                         sas_length);
 
                 if (ret != -1) {
                     /* if any/all of these creations would fail the node creation will fail and cleanup */
@@ -78,9 +78,9 @@ static struct flb_upstream_node *flb_upstream_node_create_url(struct flb_azure_k
                     sds_port = flb_sds_create(port);
 
                     node = flb_upstream_node_create(
-                        NULL, sds_host, sds_port, FLB_TRUE, ctx->ins->tls->verify,
-                        ctx->ins->tls->debug, ctx->ins->tls->vhost, NULL, NULL, NULL,
-                        NULL, NULL, kv, config);
+                            NULL, sds_host, sds_port, FLB_TRUE, ctx->ins->tls->verify,
+                            ctx->ins->tls->debug, ctx->ins->tls->vhost, NULL, NULL, NULL,
+                            NULL, NULL, kv, config);
 
                     if (!node) {
                         flb_plg_error(ctx->ins, "error creating resource upstream node");
@@ -159,9 +159,8 @@ static int parse_storage_resources(struct flb_azure_kusto *ctx, struct flb_confi
                                    struct flb_upstream_ha *queue_ha)
 {
     jsmn_parser parser;
-    jsmntok_t *t;
-    jsmntok_t *tokens;
-    int tok_size = 100;
+    jsmntok_t *tokens = NULL;
+    //int tok_size = 100;
     int ret = -1;
     int i;
     int blob_count = 0;
@@ -171,7 +170,7 @@ static int parse_storage_resources(struct flb_azure_kusto *ctx, struct flb_confi
     int resource_type;
     struct flb_upstream_node *node;
     struct flb_upstream_ha *ha;
-    flb_sds_t resource_uri;
+    flb_sds_t resource_uri = NULL;
 
     /* Response is a json in the form of
      * {
@@ -195,19 +194,27 @@ static int parse_storage_resources(struct flb_azure_kusto *ctx, struct flb_confi
     resource_uri = flb_sds_create(NULL);
     if (!resource_uri) {
         flb_plg_error(ctx->ins, "error allocating resource uri buffer");
-        return -1;
+        goto cleanup;
     }
 
     jsmn_init(&parser);
-    tokens = flb_calloc(1, sizeof(jsmntok_t) * tok_size);
+    //tokens = flb_calloc(1, sizeof(jsmntok_t) * tok_size);
+
+    /* Dynamically allocate memory for tokens based on response length */
+    tokens = flb_calloc(1, sizeof(jsmntok_t) * (flb_sds_len(response)));
+
+    if (!tokens) {
+        flb_plg_error(ctx->ins, "error allocating tokens");
+        goto cleanup;
+    }
 
     if (tokens) {
-        ret = jsmn_parse(&parser, response, flb_sds_len(response), tokens, tok_size);
+        ret = jsmn_parse(&parser, response, flb_sds_len(response), tokens, flb_sds_len(response));
 
         if (ret > 0) {
             /* skip all tokens until we reach "Rows" */
             for (i = 0; i < ret - 1; i++) {
-                t = &tokens[i];
+                jsmntok_t *t = &tokens[i];
 
                 if (t->type != JSMN_STRING) {
                     continue;
@@ -230,7 +237,7 @@ static int parse_storage_resources(struct flb_azure_kusto *ctx, struct flb_confi
              * values, the first value containing the resource type, and the second value
              * containing the resource uri */
             for (; i < ret; i++) {
-                t = &tokens[i];
+                jsmntok_t *t = &tokens[i];
 
                 /**
                  * each token should be an array with 2 strings:
@@ -261,8 +268,8 @@ static int parse_storage_resources(struct flb_azure_kusto *ctx, struct flb_confi
                          strncmp(token_str, "SecuredReadyForAggregationQueue", 31) == 0) {
                     resource_type = AZURE_KUSTO_RESOURCE_QUEUE;
                 }
-                /* we don't care about other resources so we just skip the next token and
-                   move on to the next pair */
+                    /* we don't care about other resources so we just skip the next token and
+                       move on to the next pair */
                 else {
                     i++;
                     continue;
@@ -280,6 +287,11 @@ static int parse_storage_resources(struct flb_azure_kusto *ctx, struct flb_confi
                 token_str_len = (t->end - t->start);
 
                 resource_uri = flb_sds_copy(resource_uri, token_str, token_str_len);
+                if (!resource_uri) {
+                    flb_plg_error(ctx->ins, "error copying resource URI");
+                    ret = -1;
+                    goto cleanup;
+                }
                 if (resource_type == AZURE_KUSTO_RESOURCE_QUEUE) {
                     ha = queue_ha;
                     queue_count++;
@@ -292,7 +304,7 @@ static int parse_storage_resources(struct flb_azure_kusto *ctx, struct flb_confi
                 if (!ha) {
                     flb_plg_error(ctx->ins, "error creating HA upstream");
                     ret = -1;
-                    break;
+                    goto cleanup;
                 }
 
                 node = flb_upstream_node_create_url(ctx, config, resource_uri);
@@ -300,7 +312,7 @@ static int parse_storage_resources(struct flb_azure_kusto *ctx, struct flb_confi
                 if (!node) {
                     flb_plg_error(ctx->ins, "error creating HA upstream node");
                     ret = -1;
-                    break;
+                    goto cleanup;
                 }
 
                 flb_upstream_ha_node_add(ha, node);
@@ -316,21 +328,29 @@ static int parse_storage_resources(struct flb_azure_kusto *ctx, struct flb_confi
                 else {
                     flb_plg_error(ctx->ins, "error parsing resources: missing resources");
                     ret = -1;
+                    goto cleanup;
                 }
             }
         }
         else {
             flb_plg_error(ctx->ins, "error parsing JSON response: %s", response);
             ret = -1;
+            goto cleanup;
         }
     }
     else {
         flb_plg_error(ctx->ins, "error allocating tokens");
         ret = -1;
+        goto cleanup;
     }
 
-    flb_sds_destroy(resource_uri);
-    flb_free(tokens);
+    cleanup:
+    if (resource_uri) {
+        flb_sds_destroy(resource_uri);
+    }
+    if (tokens) {
+        flb_free(tokens);
+    }
 
     return ret;
 }
@@ -396,8 +416,7 @@ static flb_sds_t parse_ingestion_identity_token(struct flb_azure_kusto *ctx,
             identity_token = flb_sds_create_len(token_str, token_str_len);
 
             if (identity_token) {
-                flb_plg_debug(ctx->ins, "parsed kusto identity token: '%s'",
-                              identity_token);
+                flb_plg_debug(ctx->ins, "parsed kusto identity token ");
             }
             else {
                 flb_plg_error(ctx->ins, "error parsing kusto identity token");
@@ -416,6 +435,24 @@ static flb_sds_t parse_ingestion_identity_token(struct flb_azure_kusto *ctx,
     return identity_token;
 }
 
+
+
+/**
+ * This method returns random integers from range -600 to +600 which needs to be added
+ * to the kusto ingestion resources refresh interval to even out the spikes
+ * in kusto DM for .get ingestion resources upon expiry
+ * */
+int azure_kusto_generate_random_integer() {
+    // Seed the random number generator
+    int pid = getpid();
+    unsigned long address = (unsigned long)&address;
+    unsigned int seed = pid ^ (address & 0xFFFFFFFF) * time(0);
+    srand(seed);
+    // Generate a random integer in the range [-600, 600]
+    int random_integer = rand() % 1201 - 600;
+    return random_integer;
+}
+
 int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
                                          struct flb_config *config)
 {
@@ -426,22 +463,21 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
     struct flb_upstream_ha *queue_ha = NULL;
     time_t now;
 
-    if (pthread_mutex_lock(&ctx->resources_mutex)) {
-        flb_plg_error(ctx->ins, "error locking mutex");
-        return -1;
-    }
+    int generated_random_integer = azure_kusto_generate_random_integer();
+    flb_plg_debug(ctx->ins, "check if the latest changes are there 4");
+    flb_plg_debug(ctx->ins, "generated random integer %d", generated_random_integer);
 
     now = time(NULL);
 
     /* check if we have all resources and they are not stale */
     if (ctx->resources->blob_ha && ctx->resources->queue_ha &&
         ctx->resources->identity_token &&
-        now - ctx->resources->load_time < FLB_AZURE_KUSTO_RESOURCES_LOAD_INTERVAL_SEC) {
+        now - ctx->resources->load_time < ctx->ingestion_resources_refresh_interval + generated_random_integer) {
         flb_plg_debug(ctx->ins, "resources are already loaded and are not stale");
         ret = 0;
     }
     else {
-        flb_plg_info(ctx->ins, "loading kusto ingestion resourcs");
+        flb_plg_info(ctx->ins, "loading kusto ingestion resources and refresh interval is %d", ctx->ingestion_resources_refresh_interval + generated_random_integer);
         response = execute_ingest_csl_command(ctx, ".get ingestion resources");
 
         if (response) {
@@ -451,41 +487,68 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
                 blob_ha = flb_upstream_ha_create("azure_kusto_blob_ha");
 
                 if (blob_ha) {
+
+                    if (pthread_mutex_lock(&ctx->resources_mutex)) {
+                        flb_plg_error(ctx->ins, "error locking mutex");
+                        ret = -1;
+                        goto cleanup;
+                    }
                     ret =
-                        parse_storage_resources(ctx, config, response, blob_ha, queue_ha);
+                            parse_storage_resources(ctx, config, response, blob_ha, queue_ha);
+
+                    if (pthread_mutex_unlock(&ctx->resources_mutex)) {
+                        flb_plg_error(ctx->ins, "error unlocking mutex");
+                        ret = -1;
+                        goto cleanup;
+                    }
 
                     if (ret == 0) {
                         flb_sds_destroy(response);
                         response = NULL;
 
                         response =
-                            execute_ingest_csl_command(ctx, ".get kusto identity token");
+                                execute_ingest_csl_command(ctx, ".get kusto identity token");
 
                         if (response) {
+                            if (pthread_mutex_lock(&ctx->resources_mutex)) {
+                                flb_plg_error(ctx->ins, "error locking mutex");
+                                ret = -1;
+                                goto cleanup;
+                            }
                             identity_token =
-                                parse_ingestion_identity_token(ctx, response);
+                                    parse_ingestion_identity_token(ctx, response);
 
                             if (identity_token) {
-                                ret = flb_azure_kusto_resources_clear(ctx->resources);
-
-                                if (ret != -1) {
-                                    ctx->resources->blob_ha = blob_ha;
-                                    ctx->resources->queue_ha = queue_ha;
-                                    ctx->resources->identity_token = identity_token;
-                                    ctx->resources->load_time = now;
-
-                                    ret = 0;
+                                /* Ensure any previously allocated identity token is freed */
+                                /*if (ctx->resources->identity_token) {
+                                    flb_sds_destroy(ctx->resources->identity_token);
+                                    //ctx->resources->identity_token = NULL;
                                 }
-                                else {
-                                    flb_plg_error(
-                                        ctx->ins,
-                                        "error destroying previous ingestion resources");
+                                *//* Ensure any previously allocated blob_ha and queue_ha are freed *//*
+                                if (ctx->resources->blob_ha) {
+                                    flb_upstream_ha_destroy(ctx->resources->blob_ha);
+                                    //ctx->resources->blob_ha = NULL;
                                 }
+                                if (ctx->resources->queue_ha) {
+                                    flb_upstream_ha_destroy(ctx->resources->queue_ha);
+                                    //ctx->resources->queue_ha = NULL;
+                                }*/
+                                ctx->resources->blob_ha = blob_ha;
+                                ctx->resources->queue_ha = queue_ha;
+                                ctx->resources->identity_token = identity_token;
+                                ctx->resources->load_time = now;
+
+                                ret = 0;
                             }
                             else {
                                 flb_plg_error(ctx->ins,
                                               "error parsing ingestion identity token");
                                 ret = -1;
+                            }
+                            if (pthread_mutex_unlock(&ctx->resources_mutex)) {
+                                flb_plg_error(ctx->ins, "error unlocking mutex");
+                                ret = -1;
+                                goto cleanup;
                             }
                         }
                         else {
@@ -501,6 +564,7 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
 
                     if (ret == -1) {
                         flb_upstream_ha_destroy(blob_ha);
+                        blob_ha = NULL;
                     }
                 }
                 else {
@@ -510,6 +574,7 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
 
                 if (ret == -1) {
                     flb_upstream_ha_destroy(queue_ha);
+                    queue_ha = NULL;
                 }
             }
             else {
@@ -525,9 +590,20 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
         }
     }
 
-    if (pthread_mutex_unlock(&ctx->resources_mutex)) {
-        flb_plg_error(ctx->ins, "error unlocking mutex");
-        return -1;
+    cleanup:
+    if (ret == -1) {
+        if (queue_ha) {
+            flb_upstream_ha_destroy(queue_ha);
+        }
+        if (blob_ha) {
+            flb_upstream_ha_destroy(blob_ha);
+        }
+        if (response) {
+            flb_sds_destroy(response);
+        }
+        if (identity_token) {
+            flb_sds_destroy(identity_token);
+        }
     }
 
     return ret;
@@ -644,6 +720,8 @@ int flb_azure_kusto_conf_destroy(struct flb_azure_kusto *ctx)
     if (!ctx) {
         return -1;
     }
+
+    flb_plg_info(ctx->ins, "before exiting the plugin kusto conf destroy called");
 
     if (ctx->oauth_url) {
         flb_sds_destroy(ctx->oauth_url);

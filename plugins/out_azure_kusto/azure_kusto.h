@@ -26,6 +26,13 @@
 #include <fluent-bit/flb_sds.h>
 #include <fluent-bit/flb_upstream_ha.h>
 
+#include <fluent-bit/flb_scheduler.h>
+#include <fluent-bit/flb_utils.h>
+#include <fluent-bit/flb_time.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
 /* refresh token every 50 minutes */
 #define FLB_AZURE_KUSTO_TOKEN_REFRESH 3000
 
@@ -49,7 +56,18 @@
 #define AZURE_KUSTO_RESOURCE_UPSTREAM_URI "uri"
 #define AZURE_KUSTO_RESOURCE_UPSTREAM_SAS "sas"
 
-#define FLB_AZURE_KUSTO_RESOURCES_LOAD_INTERVAL_SEC 3600
+#define FLB_AZURE_KUSTO_RESOURCES_LOAD_INTERVAL_SEC "3600"
+
+#define FLB_AZURE_KUSTO_INGEST_ENDPOINT_CONNECTION_TIMEOUT "60"
+
+#define FLB_AZURE_KUSTO_BUFFER_DIR_MAX_SIZE (4LL * 1024LL * 1024LL * 1024LL)  // 4GB
+#define FLB_AZURE_KUSTO_BUFFER_MAX_FILE_SIZE (100 * 1024 * 1024)         // 100MB
+#define FLB_AZURE_KUSTO_BUFFER_MAX_FILE_WAIT_TIME (30 * 60)
+#define MAX_UPLOAD_ERRORS 5// 30 minutes
+#define UPLOAD_TIMER_MAX_WAIT 180000
+#define UPLOAD_TIMER_MIN_WAIT 18000
+#define MAX_FILE_SIZE         4000000000 // 4GB
+
 
 struct flb_azure_kusto_resources {
     struct flb_upstream_ha *blob_ha;
@@ -70,6 +88,13 @@ struct flb_azure_kusto {
     flb_sds_t table_name;
     flb_sds_t ingestion_mapping_reference;
 
+    int ingestion_endpoint_connect_timeout;
+
+    /* compress payload */
+    int compression_enabled;
+
+    int ingestion_resources_refresh_interval;
+
     /* records configuration */
     flb_sds_t log_key;
     int include_tag_key;
@@ -77,9 +102,9 @@ struct flb_azure_kusto {
     int include_time_key;
     flb_sds_t time_key;
 
-    /* --- internal data --- */
+    flb_sds_t azure_kusto_buffer_key;
 
-    flb_sds_t ingestion_mgmt_endpoint;
+    /* --- internal data --- */
 
     /* oauth2 context */
     flb_sds_t oauth_url;
@@ -93,6 +118,27 @@ struct flb_azure_kusto {
 
     /* mutex for loading reosurces */
     pthread_mutex_t resources_mutex;
+
+    pthread_mutex_t blob_mutex;
+
+    pthread_mutex_t buffer_mutex;
+
+    int buffering_enabled;
+
+    size_t file_size;
+    time_t upload_timeout;
+    time_t retry_time;
+
+    int has_old_buffers;
+    size_t store_dir_limit_size;
+    /* track the total amount of buffered data */
+    size_t current_buffer_size;
+    flb_sds_t buffer_dir;
+    char *store_dir;
+    struct flb_fstore *fs;
+    struct flb_fstore_stream *stream_active;  /* default active stream */
+    struct flb_fstore_stream *stream_upload;
+
 
     /* Upstream connection to the backend server */
     struct flb_upstream *u;

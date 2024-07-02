@@ -18,16 +18,23 @@
  */
 
 #include <fluent-bit/flb_http_client.h>
-#include <fluent-bit/flb_kv.h>
 #include <fluent-bit/flb_oauth2.h>
 #include <fluent-bit/flb_output_plugin.h>
 #include <fluent-bit/flb_pack.h>
-#include <fluent-bit/flb_signv4.h>
 #include <fluent-bit/flb_log_event_decoder.h>
+#include <fluent-bit/flb_scheduler.h>
+#include <fluent-bit/flb_gzip.h>
+#include <fluent-bit/flb_utils.h>
+#include <stdio.h>
+#include <fluent-bit/flb_sds.h>
+#include <fluent-bit/flb_fstore.h>
+#include <msgpack.h>
+#include <cJSON.h>
 
 #include "azure_kusto.h"
 #include "azure_kusto_conf.h"
 #include "azure_kusto_ingest.h"
+#include "azure_kusto_store.h"
 
 /* Create a new oauth2 context and get a oauth2 token */
 static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
@@ -126,11 +133,22 @@ flb_sds_t execute_ingest_csl_command(struct flb_azure_kusto *ctx, const char *cs
     struct flb_http_client *c;
     flb_sds_t resp = NULL;
 
+    flb_plg_debug(ctx->ins, "before getting upstream connection");
+
+    flb_plg_debug(ctx->ins, "Logging attributes of flb_azure_kusto_resources:");
+    flb_plg_debug(ctx->ins, "blob_ha: %p", ctx->resources->blob_ha);
+    flb_plg_debug(ctx->ins, "queue_ha: %p", ctx->resources->queue_ha);
+    flb_plg_debug(ctx->ins, "identity_token: %s", ctx->resources->identity_token);
+    flb_plg_debug(ctx->ins, "load_time: %lu", ctx->resources->load_time);
+
+    ctx->u->base.net.connect_timeout = ctx->ingestion_endpoint_connect_timeout ;
+
     /* Get upstream connection */
     u_conn = flb_upstream_conn_get(ctx->u);
 
     if (u_conn) {
         token = get_azure_kusto_token(ctx);
+        flb_plg_debug(ctx->ins, "after get azure kusto token");
 
         if (token) {
             /* Compose request body */
@@ -152,20 +170,23 @@ flb_sds_t execute_ingest_csl_command(struct flb_azure_kusto *ctx, const char *cs
                     flb_http_add_header(c, "Accept", 6, "application/json", 16);
                     flb_http_add_header(c, "Authorization", 13, token,
                                         flb_sds_len(token));
+                    flb_http_add_header(c, "x-ms-client-version", 19, "Kusto.Fluent-Bit:1.0.0", 22);
+                    flb_http_add_header(c, "x-ms-app", 8, "Kusto.Fluent-Bit", 16);
+                    flb_http_add_header(c, "x-ms-user", 9, "Kusto.Fluent-Bit", 16);
                     flb_http_buffer_size(c, FLB_HTTP_DATA_SIZE_MAX * 10);
 
                     /* Send HTTP request */
                     ret = flb_http_do(c, &b_sent);
                     flb_plg_debug(
-                        ctx->ins,
-                        "Kusto ingestion command request http_do=%i, HTTP Status: %i",
-                        ret, c->resp.status);
+                            ctx->ins,
+                            "Kusto ingestion command request http_do=%i, HTTP Status: %i",
+                            ret, c->resp.status);
 
                     if (ret == 0) {
                         if (c->resp.status == 200) {
                             /* Copy payload response to the response param */
                             resp =
-                                flb_sds_create_len(c->resp.payload, c->resp.payload_size);
+                                    flb_sds_create_len(c->resp.payload, c->resp.payload_size);
                         }
                         else if (c->resp.payload_size > 0) {
                             flb_plg_debug(ctx->ins, "Request failed and returned: \n%s",
@@ -206,17 +227,275 @@ flb_sds_t execute_ingest_csl_command(struct flb_azure_kusto *ctx, const char *cs
     return resp;
 }
 
+/*
+ * Either new_data or chunk can be NULL, but not both
+ */
+static int construct_request_buffer(struct flb_azure_kusto *ctx, flb_sds_t new_data,
+                                    struct azure_kusto_file *upload_file,
+                                    char **out_buf, size_t *out_size)
+{
+    char *body;
+    char *tmp;
+    size_t body_size = 0;
+    char *buffered_data = NULL;
+    size_t buffer_size = 0;
+    int ret;
+
+    if (new_data == NULL && upload_file == NULL) {
+        flb_plg_error(ctx->ins, "[construct_request_buffer] Something went wrong"
+                                " both chunk and new_data are NULL");
+        return -1;
+    }
+
+    if (upload_file) {
+        ret = azure_kusto_store_file_upload_read(ctx, upload_file->fsf, &buffered_data, &buffer_size);
+        if (ret < 0) {
+            flb_plg_error(ctx->ins, "Could not read locally buffered data %s",
+                          upload_file->fsf->name);
+            return -1;
+        }
+
+        /*
+         * lock the upload_file from buffer list
+         */
+        azure_kusto_store_file_lock(upload_file);
+        body = buffered_data;
+        body_size = buffer_size;
+    }
+
+    flb_plg_debug(ctx->ins, "[construct_request_buffer] size of buffer file read %zu", buffer_size);
+
+    /*
+     * If new data is arriving, increase the original 'buffered_data' size
+     * to append the new one.
+     */
+    if (new_data) {
+        body_size += flb_sds_len(new_data);
+        flb_plg_debug(ctx->ins, "[construct_request_buffer] size of new_data %zu", body_size);
+
+        tmp = flb_realloc(buffered_data, body_size + 1);
+        if (!tmp) {
+            flb_errno();
+            flb_free(buffered_data);
+            if (upload_file) {
+                azure_kusto_store_file_unlock(upload_file);
+            }
+            return -1;
+        }
+        body = buffered_data = tmp;
+        memcpy(body + buffer_size, new_data, flb_sds_len(new_data));
+        if (ctx->compression_enabled == FLB_FALSE){
+            body[body_size] = '\0';
+        }
+    }
+
+    flb_plg_debug(ctx->ins, "[construct_request_buffer] final increased %zu", body_size);
+
+    *out_buf = body;
+    *out_size = body_size;
+
+    return 0;
+}
+
+
+static int cb_azure_kusto_ingest(struct flb_config *config, void *data)
+{
+    struct flb_azure_kusto *ctx = data;
+    struct azure_kusto_file *file = NULL;
+    struct flb_fstore_file *fsf;
+    char *buffer = NULL;
+    size_t buffer_size = 0;
+    struct mk_list *tmp;
+    struct mk_list *head;
+    int ret;
+    time_t now;
+    flb_sds_t payload;
+    flb_sds_t tag_sds;
+
+    flb_plg_debug(ctx->ins, "Running upload timer callback (cb_azure_kusto_ingest)..");
+
+    now = time(NULL);
+
+    /* Check all chunks and see if any have timed out */
+    mk_list_foreach_safe(head, tmp, &ctx->stream_active->files) {
+        fsf = mk_list_entry(head, struct flb_fstore_file, _head);
+        file = fsf->data;
+        flb_plg_debug(ctx->ins, "Iterating files inside upload timer callback (cb_azure_kusto_ingest).. %s", file->fsf->name);
+        if (now < (file->create_time + ctx->upload_timeout + ctx->retry_time)) {
+            continue; /* Only send chunks which have timed out */
+        }
+
+        flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest :: Before file locked check %s", file->fsf->name);
+        /* Locked chunks are being processed, skip */
+        if (file->locked == FLB_TRUE) {
+            continue;
+        }
+
+        flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest :: Before construct_request_buffer %s", file->fsf->name);
+        ret = construct_request_buffer(ctx, NULL, file, &buffer, &buffer_size);
+        if (ret < 0) {
+            flb_plg_error(ctx->ins, "Could not construct request buffer for %s",
+                          file->fsf->name);
+            continue;
+        }
+
+        payload = flb_sds_create(buffer);
+        tag_sds = flb_sds_create(fsf->meta_buf);
+
+        flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest ::: tag of the file %s", tag_sds);
+
+        ret = azure_kusto_load_ingestion_resources(ctx, config);
+        if (ret != 0) {
+            flb_plg_error(ctx->ins, "cannot load ingestion resources");
+            return -1;
+        }
+
+        flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest ::: before starting kusto queued ingestion %s", file->fsf->name);
+
+        ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), payload, flb_sds_len(payload));
+        if (ret != 0) {
+            flb_plg_error(ctx->ins, "Failed to ingest data to Azure Blob");
+        }
+
+        if (ret == 0) {
+            flb_plg_debug(ctx->ins, "deleted successfully ingested file %s", fsf->name);
+            flb_fstore_file_delete(ctx->fs, fsf);
+        }
+
+        flb_free(buffer);
+        flb_sds_destroy(payload);
+        flb_sds_destroy(tag_sds);
+        if (ret != 0) {
+            flb_plg_error(ctx->ins, "Could not send chunk with tag %s",
+                          (char *) fsf->meta_buf);
+        }
+    }
+    flb_plg_debug(ctx->ins, "Exited upload timer callback (cb_azure_kusto_ingest)..");
+    return ret;
+}
+
+/* ingest data to Azure Kusto */
+static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
+                               struct azure_kusto_file *upload_file,
+                               const char *tag, int tag_len)
+{
+    int ret;
+    char *buffer = NULL;
+    size_t buffer_size;
+    struct flb_azure_kusto *ctx = out_context;
+    flb_sds_t payload = NULL;
+    void *final_payload = NULL;
+    size_t final_payload_size = 0;
+    int is_compressed = FLB_FALSE;
+    flb_sds_t tag_sds = flb_sds_create_len(tag, tag_len);
+
+    /*if (pthread_mutex_lock(&ctx->buffer_mutex)) {
+        flb_plg_error(ctx->ins, "error unlocking mutex");
+        return -1;
+    }*/
+
+    /* Create buffer */
+    ret = construct_request_buffer(ctx, new_data, upload_file, &buffer, &buffer_size);
+    if (ret < 0) {
+        flb_plg_error(ctx->ins, "Could not construct request buffer for %s",
+                      upload_file->fsf->name);
+        return -1;
+    }
+    payload = flb_sds_create_len(buffer, buffer_size);
+    flb_free(buffer);
+
+    /* Compress the JSON payload */
+    if (ctx->compression_enabled == FLB_TRUE) {
+        ret = flb_gzip_compress((void *) payload, flb_sds_len(payload),
+                                &final_payload, &final_payload_size);
+        if (ret != 0) {
+            flb_plg_error(ctx->ins,
+                          "cannot gzip payload");
+            flb_sds_destroy(payload);
+            flb_sds_destroy(tag_sds);
+            //pthread_mutex_unlock(&ctx->buffer_mutex);
+            return -1;
+        }
+        else {
+            is_compressed = FLB_TRUE;
+            flb_plg_debug(ctx->ins, "enabled payload gzip compression");
+            /* JSON buffer will be cleared at cleanup: */
+        }
+    } else {
+        final_payload = payload;
+        final_payload_size = flb_sds_len(payload);
+    }
+
+    /*if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
+        flb_plg_error(ctx->ins, "error unlocking mutex");
+        return -1;
+    }*/
+
+    // Call azure_kusto_queued_ingestion to ingest the payload
+    ret = azure_kusto_queued_ingestion(ctx, tag_sds, tag_len, final_payload, final_payload_size);
+    if (ret != 0) {
+        flb_plg_error(ctx->ins, "Failed to ingest data to Azure Kusto");
+        flb_sds_destroy(tag_sds);
+        flb_sds_destroy(payload);
+        if (is_compressed) {
+            flb_free(final_payload);
+        }
+        return -1;
+    }
+
+    flb_sds_destroy(tag_sds);
+    flb_sds_destroy(payload);
+    if (is_compressed) {
+        flb_free(final_payload);
+    }
+
+    return 0;
+}
+
+
 static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_config *config,
                                void *data)
 {
     int io_flags = FLB_IO_TLS;
     struct flb_azure_kusto *ctx;
 
+    flb_plg_debug(ins, "inside azure kusto init");
+
     /* Create config context */
     ctx = flb_azure_kusto_conf_create(ins, config);
     if (!ctx) {
         flb_plg_error(ins, "configuration failed");
         return -1;
+    }
+
+    if (ctx->buffering_enabled == FLB_TRUE) {
+        ctx->ins = ins;
+        ctx->retry_time = 0;
+        ctx->store_dir_limit_size = FLB_AZURE_KUSTO_BUFFER_DIR_MAX_SIZE;
+        ctx->has_old_buffers = azure_kusto_store_has_data(ctx);
+
+        /* Initialize local storage */
+        int ret = azure_kusto_store_init(ctx);
+        if (ret == -1) {
+            flb_plg_error(ctx->ins, "Failed to initialize kusto storage: %s",
+                          ctx->store_dir);
+            return -1;
+        }
+
+        /* validate 'total_file_size' */
+        if (ctx->file_size <= 0) {
+            flb_plg_error(ctx->ins, "Failed to parse upload_file_size");
+            return -1;
+        }
+        if (ctx->file_size < 1000000) {
+            flb_plg_error(ctx->ins, "upload_file_size must be at least 1MB");
+            return -1;
+        }
+        if (ctx->file_size > MAX_FILE_SIZE) {
+            flb_plg_error(ctx->ins, "Max total_file_size must be lower than %ld bytes", MAX_FILE_SIZE);
+            return -1;
+        }
+        flb_plg_info(ctx->ins, "Using upload size %lu bytes", ctx->file_size);
     }
 
     flb_output_set_context(ins, ctx);
@@ -231,6 +510,8 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
      */
     pthread_mutex_init(&ctx->token_mutex, NULL);
     pthread_mutex_init(&ctx->resources_mutex, NULL);
+    pthread_mutex_init(&ctx->blob_mutex, NULL);
+    pthread_mutex_init(&ctx->buffer_mutex, NULL);
 
     /*
      * Create upstream context for Kusto Ingestion endpoint
@@ -243,12 +524,14 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
 
     /* Create oauth2 context */
     ctx->o =
-        flb_oauth2_create(ctx->config, ctx->oauth_url, FLB_AZURE_KUSTO_TOKEN_REFRESH);
+            flb_oauth2_create(ctx->config, ctx->oauth_url, FLB_AZURE_KUSTO_TOKEN_REFRESH);
     if (!ctx->o) {
         flb_plg_error(ctx->ins, "cannot create oauth2 context");
         return -1;
     }
     flb_output_upstream_set(ctx->u, ins);
+
+    flb_plg_debug(ctx->ins, "azure kusto init completed");
 
     return 0;
 }
@@ -295,8 +578,8 @@ static int azure_kusto_format(struct flb_azure_kusto *ctx, const char *tag, int 
     msgpack_pack_array(&mp_pck, records);
 
     while ((ret = flb_log_event_decoder_next(
-                    &log_decoder,
-                    &log_event)) == FLB_EVENT_DECODER_SUCCESS) {
+            &log_decoder,
+            &log_event)) == FLB_EVENT_DECODER_SUCCESS) {
         map_size = 1;
         if (ctx->include_time_key == FLB_TRUE) {
             map_size++;
@@ -320,7 +603,7 @@ static int azure_kusto_format(struct flb_azure_kusto *ctx, const char *tag, int 
 
             len = snprintf(time_formatted + s, sizeof(time_formatted) - 1 - s,
                            ".%03" PRIu64 "Z",
-                           (uint64_t)log_event.timestamp.tm.tv_nsec / 1000000);
+                    (uint64_t)log_event.timestamp.tm.tv_nsec / 1000000);
             s += len;
             msgpack_pack_str(&mp_pck, s);
             msgpack_pack_str_body(&mp_pck, time_formatted, s);
@@ -357,52 +640,368 @@ static int azure_kusto_format(struct flb_azure_kusto *ctx, const char *tag, int 
     return 0;
 }
 
+static int azure_kusto_format_ext(struct flb_azure_kusto *ctx, const char *tag, int tag_len,
+                                  const void *data, size_t bytes, void **out_data,
+                                  size_t *out_size)
+{
+    int records = 0;
+    msgpack_sbuffer mp_sbuf;
+    msgpack_packer mp_pck;
+    struct tm tms;
+    char time_formatted[32];
+    size_t s;
+    int len;
+    struct flb_log_event_decoder log_decoder;
+    struct flb_log_event log_event;
+    int ret;
+    flb_sds_t out_buf;
+
+    /* Create array for all records */
+    records = flb_mp_count(data, bytes);
+    if (records <= 0) {
+        flb_plg_error(ctx->ins, "error counting msgpack entries");
+        return -1;
+    }
+
+    ret = flb_log_event_decoder_init(&log_decoder, (char *) data, bytes);
+    if (ret != FLB_EVENT_DECODER_SUCCESS) {
+        flb_plg_error(ctx->ins, "Log event decoder initialization error : %d", ret);
+        return -1;
+    }
+
+    /* Initialize the output buffer */
+    out_buf = flb_sds_create_size(1024);
+    if (!out_buf) {
+        flb_plg_error(ctx->ins, "error creating output buffer");
+        flb_log_event_decoder_destroy(&log_decoder);
+        return -1;
+    }
+
+    /* Create temporary msgpack buffer */
+    msgpack_sbuffer_init(&mp_sbuf);
+    msgpack_packer_init(&mp_pck, &mp_sbuf, msgpack_sbuffer_write);
+
+    while ((ret = flb_log_event_decoder_next(&log_decoder, &log_event)) == FLB_EVENT_DECODER_SUCCESS) {
+        msgpack_sbuffer_clear(&mp_sbuf);
+
+        int map_size = 1;
+        if (ctx->include_time_key == FLB_TRUE) {
+            map_size++;
+        }
+        if (ctx->include_tag_key == FLB_TRUE) {
+            map_size++;
+        }
+
+        msgpack_pack_map(&mp_pck, map_size);
+
+        /* include_time_key */
+        if (ctx->include_time_key == FLB_TRUE) {
+            msgpack_pack_str(&mp_pck, flb_sds_len(ctx->time_key));
+            msgpack_pack_str_body(&mp_pck, ctx->time_key, flb_sds_len(ctx->time_key));
+
+            gmtime_r(&log_event.timestamp.tm.tv_sec, &tms);
+            s = strftime(time_formatted, sizeof(time_formatted) - 1, FLB_PACK_JSON_DATE_ISO8601_FMT, &tms);
+            len = snprintf(time_formatted + s, sizeof(time_formatted) - 1 - s, ".%03" PRIu64 "Z",
+                    (uint64_t) log_event.timestamp.tm.tv_nsec / 1000000);
+            s += len;
+            msgpack_pack_str(&mp_pck, s);
+            msgpack_pack_str_body(&mp_pck, time_formatted, s);
+        }
+
+        /* include_tag_key */
+        if (ctx->include_tag_key == FLB_TRUE) {
+            msgpack_pack_str(&mp_pck, flb_sds_len(ctx->tag_key));
+            msgpack_pack_str_body(&mp_pck, ctx->tag_key, flb_sds_len(ctx->tag_key));
+            msgpack_pack_str(&mp_pck, tag_len);
+            msgpack_pack_str_body(&mp_pck, tag, tag_len);
+        }
+
+        msgpack_pack_str(&mp_pck, flb_sds_len(ctx->log_key));
+        msgpack_pack_str_body(&mp_pck, ctx->log_key, flb_sds_len(ctx->log_key));
+
+        if (log_event.body != NULL) {
+            msgpack_pack_object(&mp_pck, *log_event.body);
+        } else {
+            msgpack_pack_str(&mp_pck, 20);
+            msgpack_pack_str_body(&mp_pck, "log_attribute_missing", 20);
+        }
+
+        flb_sds_t json_record = flb_msgpack_raw_to_json_sds(mp_sbuf.data, mp_sbuf.size);
+        if (!json_record) {
+            flb_plg_error(ctx->ins, "error converting msgpack to JSON");
+            flb_sds_destroy(out_buf);
+            msgpack_sbuffer_destroy(&mp_sbuf);
+            flb_log_event_decoder_destroy(&log_decoder);
+            return -1;
+        }
+
+        /* Concatenate the JSON record to the output buffer */
+        out_buf = flb_sds_cat(out_buf, json_record, flb_sds_len(json_record));
+        out_buf = flb_sds_cat(out_buf, "\n", 1);
+
+        flb_sds_destroy(json_record);
+    }
+
+    msgpack_sbuffer_destroy(&mp_sbuf);
+    flb_log_event_decoder_destroy(&log_decoder);
+
+    *out_data = out_buf;
+    *out_size = flb_sds_len(out_buf);
+
+    return 0;
+}
+
+static int buffer_chunk(void *out_context, struct azure_kusto_file *upload_file,
+                        flb_sds_t chunk, int chunk_size,
+                        flb_sds_t tag, size_t tag_len)
+{
+    int ret;
+    struct flb_azure_kusto *ctx = out_context;
+
+    flb_plg_trace(ctx->ins, "Buffering chunk %d", chunk_size);
+
+    ret = azure_kusto_store_buffer_put(ctx, upload_file, tag,
+                                       tag_len, chunk, chunk_size);
+    if (ret < 0) {
+        flb_plg_error(ctx->ins, "Could not buffer chunk. ");
+        return -1;
+    }
+    return 0;
+}
+
+static void flush_init(void *out_context, struct flb_config *config)
+{
+    int ret;
+    struct flb_azure_kusto *ctx = out_context;
+
+    /* clean up any old buffers found on startup */
+    if (ctx->has_old_buffers == FLB_TRUE) {
+        flb_plg_info(ctx->ins,
+                     "Sending locally buffered data from previous "
+                     "executions to kusto; buffer=%s",
+                     ctx->fs->root_path);
+        ctx->has_old_buffers = FLB_FALSE;
+        ret = cb_azure_kusto_ingest(config, ctx);
+        if (ret < 0) {
+            ctx->has_old_buffers = FLB_TRUE;
+            flb_plg_error(ctx->ins,
+                          "Failed to send locally buffered data left over "
+                          "from previous executions; will retry. Buffer=%s",
+                          ctx->fs->root_path);
+            FLB_OUTPUT_RETURN(FLB_RETRY);
+        }
+    }
+}
+
 static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                  struct flb_output_flush *out_flush,
                                  struct flb_input_instance *i_ins, void *out_context,
                                  struct flb_config *config)
 {
     int ret;
-    flb_sds_t json;
+    flb_sds_t json = NULL;
     size_t json_size;
     size_t tag_len;
     struct flb_azure_kusto *ctx = out_context;
+    int is_compressed = FLB_FALSE;
+    struct azure_kusto_file *upload_file = NULL;
+    int upload_timeout_check = FLB_FALSE;
+    int total_file_size_check = FLB_FALSE;
 
     (void)i_ins;
     (void)config;
 
-    flb_plg_trace(ctx->ins, "flushing bytes %zu", event_chunk->size);
+    void *final_payload = NULL;
+    size_t final_payload_size = 0;
+
+    flb_plg_trace(ctx->ins, "flushing bytes for event tag %s and size %zu", event_chunk->tag ,event_chunk->size);
 
     tag_len = flb_sds_len(event_chunk->tag);
 
-    /* Load or refresh ingestion resources */
-    ret = azure_kusto_load_ingestion_resources(ctx, config);
-    if (ret != 0) {
-        flb_plg_error(ctx->ins, "cannot load ingestion resources");
-        FLB_OUTPUT_RETURN(FLB_RETRY);
+    if (ctx->buffering_enabled == FLB_TRUE) {
+
+        flush_init(ctx,config);
+
+        /* Reformat msgpack to JSON payload */
+        ret = azure_kusto_format(ctx, event_chunk->tag, tag_len, event_chunk->data,
+                                 event_chunk->size, (void **)&json, &json_size);
+        if (ret != 0) {
+            flb_plg_error(ctx->ins, "cannot reformat data into json");
+            goto error;
+        }
+
+        /* Get a file candidate matching the given 'tag' */
+        upload_file = azure_kusto_store_file_get(ctx,
+                                                 event_chunk->tag,
+                                                 tag_len);
+
+        /* Discard upload_file if it has failed to upload MAX_UPLOAD_ERRORS times */
+        if (upload_file != NULL && upload_file->failures >= MAX_UPLOAD_ERRORS) {
+            flb_plg_warn(ctx->ins, "File with tag %s failed to send %d times, will not "
+                                   "retry", event_chunk->tag, MAX_UPLOAD_ERRORS);
+            azure_kusto_store_file_inactive(ctx, upload_file);
+            upload_file = NULL;
+        }
+
+        /* If upload_timeout has elapsed, upload file */
+        if (upload_file != NULL && time(NULL) >
+                                   (upload_file->create_time + ctx->upload_timeout)) {
+            upload_timeout_check = FLB_TRUE;
+            flb_plg_trace(ctx->ins, "upload_timeout reached for %s",
+                          event_chunk->tag);
+        }
+
+        /* If total_file_size has been reached, upload file */
+        if (upload_file && upload_file->size + json_size > ctx->file_size) {
+            flb_plg_trace(ctx->ins, "total_file_size exceeded %s",
+                          event_chunk->tag);
+            total_file_size_check = FLB_TRUE;
+        }
+
+        /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
+        if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
+            flb_plg_debug(ctx->ins, "uploading file %s with size %zu", upload_file->fsf->name, upload_file->size);
+            /* Load or refresh ingestion resources */
+            ret = azure_kusto_load_ingestion_resources(ctx, config);
+            if (ret != 0) {
+                flb_plg_error(ctx->ins, "cannot load ingestion resources");
+                goto error;
+            }
+
+            /* Send upload directly without upload queue */
+            ret = ingest_to_kusto_ext(ctx, json, upload_file,
+                                      event_chunk->tag,
+                                      tag_len);
+
+            if (ret == 0){
+                if (pthread_mutex_lock(&ctx->buffer_mutex)) {
+                    flb_plg_error(ctx->ins, "error locking mutex");
+                    ret = FLB_ERROR;
+                    goto error;
+                }
+                ret = azure_kusto_store_file_delete(ctx, upload_file);
+                if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
+                    flb_plg_error(ctx->ins, "error unlocking mutex");
+                    ret = FLB_ERROR;
+                    goto error;
+                }
+                if (ret != 0){
+                    /* file coudn't be deleted */
+                    ret = FLB_ERROR;
+                    goto error;
+                } else{
+                    /* file deleted successfully */
+                    ret = FLB_OK;
+                    goto cleanup;
+                }
+            }else{
+                flb_plg_error(ctx->ins, "unable to ingest data into kusto ");
+                ret = FLB_RETRY;
+                goto cleanup;
+            }
+        }
+
+        if (pthread_mutex_lock(&ctx->buffer_mutex)) {
+            flb_plg_error(ctx->ins, "error locking mutex");
+            ret = FLB_ERROR;
+            goto error;
+        }
+
+        /* Buffer current chunk in filesystem and wait for next chunk from engine */
+        ret = buffer_chunk(ctx, upload_file, json, json_size,
+                           event_chunk->tag, tag_len);
+
+        if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
+            flb_plg_error(ctx->ins, "error unlocking mutex");
+            ret = FLB_ERROR;
+            goto error;
+        }
+
+        if (ret == 0) {
+            flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
+            ret = FLB_OK;
+        } else {
+            flb_plg_error(ctx->ins, "failed to buffer chunk %s", event_chunk->tag);
+            ret = FLB_RETRY;
+        }
+        goto cleanup;
+
+    } else {
+        /* Buffering mode is disabled, proceed with regular flush */
+
+        /* Reformat msgpack to JSON payload */
+        ret = azure_kusto_format(ctx, event_chunk->tag, tag_len, event_chunk->data,
+                                 event_chunk->size, (void **)&json, &json_size);
+        if (ret != 0) {
+            flb_plg_error(ctx->ins, "cannot reformat data into json");
+            ret = FLB_RETRY;
+            goto error;
+        }
+
+        flb_plg_trace(ctx->ins, "payload size before compression %zu", json_size);
+        /* Map buffer */
+        final_payload = json;
+        final_payload_size = json_size;
+        if (ctx->compression_enabled == FLB_TRUE) {
+            ret = flb_gzip_compress((void *) json, json_size,
+                                    &final_payload, &final_payload_size);
+            if (ret != 0) {
+                flb_plg_error(ctx->ins,
+                              "cannot gzip payload");
+                ret = FLB_ERROR;
+                goto error;
+            }
+            else {
+                is_compressed = FLB_TRUE;
+                flb_plg_debug(ctx->ins, "enabled payload gzip compression");
+                /* JSON buffer will be cleared at cleanup: */
+            }
+        }
+        flb_plg_trace(ctx->ins, "payload size after compression %zu", final_payload_size);
+
+        /* Load or refresh ingestion resources */
+        ret = azure_kusto_load_ingestion_resources(ctx, config);
+        flb_plg_trace(ctx->ins, "after flushing bytes xxxx  %d", ret);
+        if (ret != 0) {
+            flb_plg_error(ctx->ins, "cannot load ingestion resources");
+            ret = FLB_RETRY;
+            goto error;
+        }
+
+        ret = azure_kusto_queued_ingestion(ctx, event_chunk->tag, tag_len, final_payload, final_payload_size);
+        flb_plg_trace(ctx->ins, "after kusto queued ingestion %d", ret);
+        if (ret != 0) {
+            flb_plg_error(ctx->ins, "cannot perform queued ingestion");
+            ret = FLB_RETRY;
+            goto error;
+        }
+
+        ret = FLB_OK;
+        goto cleanup;
     }
 
-    /* Reformat msgpack to JSON payload */
-    ret = azure_kusto_format(ctx, event_chunk->tag, tag_len, event_chunk->data,
-                             event_chunk->size, (void **)&json, &json_size);
-    if (ret != 0) {
-        flb_plg_error(ctx->ins, "cannot reformat data into json");
-        FLB_OUTPUT_RETURN(FLB_RETRY);
-    }
-
-    ret = azure_kusto_queued_ingestion(ctx, event_chunk->tag, tag_len, json, json_size);
-    if (ret != 0) {
-        flb_plg_error(ctx->ins, "cannot perform queued ingestion");
-        flb_sds_destroy(json);
-        FLB_OUTPUT_RETURN(FLB_RETRY);
-    }
-
+    cleanup:
     /* Cleanup */
-    flb_sds_destroy(json);
+    if (json) {
+        flb_sds_destroy(json);
+    }
+    if (is_compressed && final_payload) {
+        flb_free(final_payload);
+    }
 
-    /* Done */
-    FLB_OUTPUT_RETURN(FLB_OK);
+    FLB_OUTPUT_RETURN(ret);
+
+    error:
+    if (json) {
+        flb_sds_destroy(json);
+    }
+    if (is_compressed && final_payload) {
+        flb_free(final_payload);
+    }
+
+    FLB_OUTPUT_RETURN(ret);
 }
+
 
 static int cb_azure_kusto_exit(void *data, struct flb_config *config)
 {
@@ -417,61 +1016,100 @@ static int cb_azure_kusto_exit(void *data, struct flb_config *config)
         ctx->u = NULL;
     }
 
+
+    // Destroy the mutexes
+    pthread_mutex_destroy(&ctx->resources_mutex);
+    pthread_mutex_destroy(&ctx->token_mutex);
+    pthread_mutex_destroy(&ctx->blob_mutex);
+    pthread_mutex_destroy(&ctx->buffer_mutex);
+
+    azure_kusto_store_exit(ctx);
+
     flb_azure_kusto_conf_destroy(ctx);
 
     return 0;
 }
 
 static struct flb_config_map config_map[] = {
-    {FLB_CONFIG_MAP_STR, "tenant_id", (char *)NULL, 0, FLB_TRUE,
-     offsetof(struct flb_azure_kusto, tenant_id),
-     "Set the tenant ID of the AAD application used for authentication"},
-    {FLB_CONFIG_MAP_STR, "client_id", (char *)NULL, 0, FLB_TRUE,
-     offsetof(struct flb_azure_kusto, client_id),
-     "Set the client ID (Application ID) of the AAD application used for authentication"},
-    {FLB_CONFIG_MAP_STR, "client_secret", (char *)NULL, 0, FLB_TRUE,
-     offsetof(struct flb_azure_kusto, client_secret),
-     "Set the client secret (Application Password) of the AAD application used for "
-     "authentication"},
-    {FLB_CONFIG_MAP_STR, "ingestion_endpoint", (char *)NULL, 0, FLB_TRUE,
-     offsetof(struct flb_azure_kusto, ingestion_endpoint),
-     "Set the Kusto cluster's ingestion endpoint URL (e.g. "
-     "https://ingest-mycluster.eastus.kusto.windows.net)"},
-    {FLB_CONFIG_MAP_STR, "database_name", (char *)NULL, 0, FLB_TRUE,
-     offsetof(struct flb_azure_kusto, database_name), "Set the database name"},
-    {FLB_CONFIG_MAP_STR, "table_name", (char *)NULL, 0, FLB_TRUE,
-     offsetof(struct flb_azure_kusto, table_name), "Set the table name"},
-    {FLB_CONFIG_MAP_STR, "ingestion_mapping_reference", (char *)NULL, 0, FLB_TRUE,
-     offsetof(struct flb_azure_kusto, ingestion_mapping_reference),
-     "Set the ingestion mapping reference"},
-    {FLB_CONFIG_MAP_STR, "log_key", FLB_AZURE_KUSTO_DEFAULT_LOG_KEY, 0, FLB_TRUE,
-     offsetof(struct flb_azure_kusto, log_key), "The key name of event payload"},
-    {FLB_CONFIG_MAP_BOOL, "include_tag_key", "true", 0, FLB_TRUE,
-     offsetof(struct flb_azure_kusto, include_tag_key),
-     "If enabled, tag is appended to output. "
-     "The key name is used 'tag_key' property."},
-    {FLB_CONFIG_MAP_STR, "tag_key", FLB_AZURE_KUSTO_DEFAULT_TAG_KEY, 0, FLB_TRUE,
-     offsetof(struct flb_azure_kusto, tag_key),
-     "The key name of tag. If 'include_tag_key' is false, "
-     "This property is ignored"},
-    {FLB_CONFIG_MAP_BOOL, "include_time_key", "true", 0, FLB_TRUE,
-     offsetof(struct flb_azure_kusto, include_time_key),
-     "If enabled, time is appended to output. "
-     "The key name is used 'time_key' property."},
-    {FLB_CONFIG_MAP_STR, "time_key", FLB_AZURE_KUSTO_DEFAULT_TIME_KEY, 0, FLB_TRUE,
-     offsetof(struct flb_azure_kusto, time_key),
-     "The key name of the time. If 'include_time_key' is false, "
-     "This property is ignored"},
-    /* EOF */
-    {0}};
+        {FLB_CONFIG_MAP_STR, "tenant_id", (char *)NULL, 0, FLB_TRUE,
+                             offsetof(struct flb_azure_kusto, tenant_id),
+        "Set the tenant ID of the AAD application used for authentication"},
+        {FLB_CONFIG_MAP_STR, "client_id", (char *)NULL, 0, FLB_TRUE,
+                             offsetof(struct flb_azure_kusto, client_id),
+        "Set the client ID (Application ID) of the AAD application used for authentication"},
+        {FLB_CONFIG_MAP_STR, "client_secret", (char *)NULL, 0, FLB_TRUE,
+                             offsetof(struct flb_azure_kusto, client_secret),
+        "Set the client secret (Application Password) of the AAD application used for "
+        "authentication"},
+        {FLB_CONFIG_MAP_STR, "ingestion_endpoint", (char *)NULL, 0, FLB_TRUE,
+                             offsetof(struct flb_azure_kusto, ingestion_endpoint),
+        "Set the Kusto cluster's ingestion endpoint URL (e.g. "
+        "https://ingest-mycluster.eastus.kusto.windows.net)"},
+        {FLB_CONFIG_MAP_STR, "database_name", (char *)NULL, 0, FLB_TRUE,
+                             offsetof(struct flb_azure_kusto, database_name), "Set the database name"},
+        {FLB_CONFIG_MAP_STR, "table_name", (char *)NULL, 0, FLB_TRUE,
+                             offsetof(struct flb_azure_kusto, table_name), "Set the table name"},
+        {FLB_CONFIG_MAP_STR, "ingestion_mapping_reference", (char *)NULL, 0, FLB_TRUE,
+                             offsetof(struct flb_azure_kusto, ingestion_mapping_reference),
+        "Set the ingestion mapping reference"},
+        {FLB_CONFIG_MAP_STR, "log_key", FLB_AZURE_KUSTO_DEFAULT_LOG_KEY, 0, FLB_TRUE,
+                             offsetof(struct flb_azure_kusto, log_key), "The key name of event payload"},
+        {FLB_CONFIG_MAP_BOOL, "include_tag_key", "true", 0, FLB_TRUE,
+                             offsetof(struct flb_azure_kusto, include_tag_key),
+        "If enabled, tag is appended to output. "
+        "The key name is used 'tag_key' property."},
+        {FLB_CONFIG_MAP_STR, "tag_key", FLB_AZURE_KUSTO_DEFAULT_TAG_KEY, 0, FLB_TRUE,
+                             offsetof(struct flb_azure_kusto, tag_key),
+        "The key name of tag. If 'include_tag_key' is false, "
+        "This property is ignored"},
+        {FLB_CONFIG_MAP_BOOL, "include_time_key", "true", 0, FLB_TRUE,
+                             offsetof(struct flb_azure_kusto, include_time_key),
+        "If enabled, time is appended to output. "
+        "The key name is used 'time_key' property."},
+        {FLB_CONFIG_MAP_STR, "time_key", FLB_AZURE_KUSTO_DEFAULT_TIME_KEY, 0, FLB_TRUE,
+                             offsetof(struct flb_azure_kusto, time_key),
+        "The key name of the time. If 'include_time_key' is false, "
+        "This property is ignored"},
+        {FLB_CONFIG_MAP_TIME, "ingestion_endpoint_connect_timeout", FLB_AZURE_KUSTO_INGEST_ENDPOINT_CONNECTION_TIMEOUT, 0, FLB_TRUE,
+                             offsetof(struct flb_azure_kusto, ingestion_endpoint_connect_timeout),
+        "Set the ingestion endpoint connection timeout in seconds"},
+        {FLB_CONFIG_MAP_BOOL, "compression_enabled", "true", 0, FLB_TRUE,
+                             offsetof(struct flb_azure_kusto, compression_enabled), "Enable HTTP payload compression (gzip)."
+        },
+        {FLB_CONFIG_MAP_BOOL, "buffering_enabled", "false", 0, FLB_TRUE,
+                             offsetof(struct flb_azure_kusto, buffering_enabled), "Enable buffering into disk before ingesting into Azure Kusto."
+        },
+        {FLB_CONFIG_MAP_STR, "buffer_dir", "/tmp/fluent-bit/azure-kusto/", 0, FLB_TRUE,
+                             offsetof(struct flb_azure_kusto, buffer_dir), "Specifies the location of directory where the buffered data will be stored."
+        },
+        {FLB_CONFIG_MAP_TIME, "upload_timeout", "30m",
+                0, FLB_TRUE, offsetof(struct flb_azure_kusto, upload_timeout),
+        "Optionally specify a timeout for uploads. "
+        "Fluent Bit will start ingesting buffer files which have been created more than x minutes and haven't reached upload_file_size limit yet.  "
+        " Default is 30m."
+        },
+        {FLB_CONFIG_MAP_SIZE, "upload_file_size", "200M",
+                0, FLB_TRUE, offsetof(struct flb_azure_kusto, file_size),
+        "Specifies the size of files to be uploaded in MBs. Default is 200MB"
+        },
+        {FLB_CONFIG_MAP_TIME, "ingestion_resources_refresh_interval", FLB_AZURE_KUSTO_RESOURCES_LOAD_INTERVAL_SEC,0, FLB_TRUE,
+                             offsetof(struct flb_azure_kusto, ingestion_resources_refresh_interval),
+        "Set the azure kusto ingestion resources refresh interval"
+        },
+        {FLB_CONFIG_MAP_STR, "azure_kusto_buffer_key", "key",0, FLB_TRUE,
+                             offsetof(struct flb_azure_kusto, azure_kusto_buffer_key),
+        "Set the azure kusto buffer key which needs to be specified when using multiple instances of azure kusto output plugin and buffering is enabled"
+        },
+        /* EOF */
+        {0}};
 
 struct flb_output_plugin out_azure_kusto_plugin = {
-    .name = "azure_kusto",
-    .description = "Send events to Kusto (Azure Data Explorer)",
-    .cb_init = cb_azure_kusto_init,
-    .cb_flush = cb_azure_kusto_flush,
-    .cb_exit = cb_azure_kusto_exit,
-    .config_map = config_map,
-    /* Plugin flags */
-    .flags = FLB_OUTPUT_NET | FLB_IO_TLS,
+        .name = "azure_kusto",
+        .description = "Send events to Kusto (Azure Data Explorer)",
+        .cb_init = cb_azure_kusto_init,
+        .cb_flush = cb_azure_kusto_flush,
+        .cb_exit = cb_azure_kusto_exit,
+        .config_map = config_map,
+        /* Plugin flags */
+        .flags = FLB_OUTPUT_NET | FLB_IO_TLS,
 };
