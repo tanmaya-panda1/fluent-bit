@@ -461,8 +461,8 @@ int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kust
         // Check if the file exists before attempting to open it
         if (access(azure_kusto_file->file_path, F_OK) == -1) {
             flb_plg_warn(ctx->ins, "File does not exist");
-            azure_kusto_file_cleanup(azure_kusto_file);
-            flb_free(azure_kusto_file);
+            //azure_kusto_file_cleanup(azure_kusto_file);
+            //flb_free(azure_kusto_file);
             return 0;
         }
 
