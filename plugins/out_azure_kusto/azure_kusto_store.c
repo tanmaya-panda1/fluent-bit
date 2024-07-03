@@ -452,33 +452,37 @@ void azure_kusto_file_cleanup(struct azure_kusto_file *file)
 
 int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file)
 {
-    int ret = 0; // Default return value
+    int ret;
     struct flb_fstore_file *fsf;
-    int fd = -1; // File descriptor
+    int fd;
 
     fsf = azure_kusto_file->fsf;
     if (fsf != NULL) {
         // Check if the file exists before attempting to open it
         if (access(azure_kusto_file->file_path, F_OK) == -1) {
             flb_plg_warn(ctx->ins, "File '%s' does not exist", azure_kusto_file->file_path);
-            goto cleanup;
+            azure_kusto_file_cleanup(azure_kusto_file);
+            flb_free(azure_kusto_file);
+            return 0;
         }
 
         // Open the file for locking
         fd = open(azure_kusto_file->file_path, O_RDWR);
         if (fd == -1) {
-            flb_plg_error(ctx->ins, "Failed to open file '%s' for locking: %s", azure_kusto_file->file_path, strerror(errno));
-            goto cleanup;
+            flb_plg_error(ctx->ins, "Failed to open file for locking : because it doesnt exist");
+            return 0;
         }
 
         // Lock the file
         if (flock(fd, LOCK_EX | LOCK_NB) == -1) {
             if (errno == EWOULDBLOCK) {
                 flb_plg_warn(ctx->ins, "File '%s' is locked by another process, skipping deletion", azure_kusto_file->file_path);
-                goto cleanup;
+                close(fd);
+                return 0;
             } else {
                 flb_plg_error(ctx->ins, "Failed to lock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
-                goto cleanup;
+                close(fd);
+                return -1;
             }
         }
 
@@ -487,31 +491,24 @@ int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kust
         // Permanent deletion
         ret = flb_fstore_file_delete(ctx->fs, fsf);
         if (ret != 0) {
-            flb_plg_error(ctx->ins, "File ingested but failed to delete file %s with size %zu", azure_kusto_file->file_path, azure_kusto_file->size);
+            flb_plg_error(ctx->ins, "File ingested but Failed to delete file %s with size %zu", azure_kusto_file->file_path, azure_kusto_file->size);
+            ret = -1;
         } else {
-            flb_plg_debug(ctx->ins, "File ingested and deleted file '%s' with size %zu", azure_kusto_file->file_path, azure_kusto_file->size);
+            flb_plg_debug(ctx->ins, "File ingested and Deleted file '%s' and with size %zu", azure_kusto_file->file_path, azure_kusto_file->size);
+            ret = 0;
         }
 
-        // Unlock the file
-        if (flock(fd, LOCK_UN) == -1) {
-            flb_plg_error(ctx->ins, "Failed to unlock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
-        }
-    } else {
-        flb_plg_warn(ctx->ins, "The file might have been already deleted by another process");
-    }
-
-    cleanup:
-    // Close the file descriptor if it was opened
-    if (fd != -1) {
-        close(fd);
-    }
-
-    // Perform cleanup and free memory
-    if (azure_kusto_file != NULL) {
         flb_plg_debug(ctx->ins, "Freeing memory for azure_kusto_file at address: %p", (void *)azure_kusto_file);
         azure_kusto_file_cleanup(azure_kusto_file);
         flb_free(azure_kusto_file);
         azure_kusto_file = NULL; // Set pointer to NULL after freeing
+
+        // Unlock the file and close the file descriptor
+        flock(fd, LOCK_UN);
+        close(fd);
+    } else {
+        flb_plg_warn(ctx->ins, "The file might have been already deleted by another process");
+        ret = 0;
     }
 
     return ret;
