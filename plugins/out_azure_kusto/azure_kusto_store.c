@@ -458,6 +458,12 @@ int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kust
 
     fsf = azure_kusto_file->fsf;
     if (fsf != NULL) {
+        // Check if the file exists before attempting to open it
+        if (access(azure_kusto_file->file_path, F_OK) == -1) {
+            flb_plg_warn(ctx->ins, "File does not exist");
+            return 0;
+        }
+
         // Open the file for locking
         fd = open(azure_kusto_file->file_path, O_RDWR);
         if (fd == -1) {
