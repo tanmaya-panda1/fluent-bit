@@ -536,7 +536,7 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
     return 0;
 }
 
-static int azure_kusto_format(struct flb_azure_kusto *ctx, const char *tag, int tag_len,
+static int azure_kusto_format_ext(struct flb_azure_kusto *ctx, const char *tag, int tag_len,
                               const void *data, size_t bytes, void **out_data,
                               size_t *out_size)
 {
@@ -640,7 +640,7 @@ static int azure_kusto_format(struct flb_azure_kusto *ctx, const char *tag, int 
     return 0;
 }
 
-static int azure_kusto_format_ext(struct flb_azure_kusto *ctx, const char *tag, int tag_len,
+static int azure_kusto_format(struct flb_azure_kusto *ctx, const char *tag, int tag_len,
                                   const void *data, size_t bytes, void **out_data,
                                   size_t *out_size)
 {
