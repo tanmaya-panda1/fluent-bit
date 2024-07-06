@@ -178,15 +178,15 @@ flb_sds_t execute_ingest_csl_command(struct flb_azure_kusto *ctx, const char *cs
                     /* Send HTTP request */
                     ret = flb_http_do(c, &b_sent);
                     flb_plg_debug(
-                            ctx->ins,
-                            "Kusto ingestion command request http_do=%i, HTTP Status: %i",
-                            ret, c->resp.status);
+                        ctx->ins,
+                        "Kusto ingestion command request http_do=%i, HTTP Status: %i",
+                        ret, c->resp.status);
 
                     if (ret == 0) {
                         if (c->resp.status == 200) {
                             /* Copy payload response to the response param */
                             resp =
-                                    flb_sds_create_len(c->resp.payload, c->resp.payload_size);
+                                flb_sds_create_len(c->resp.payload, c->resp.payload_size);
                         }
                         else if (c->resp.payload_size > 0) {
                             flb_plg_debug(ctx->ins, "Request failed and returned: \n%s",
@@ -352,7 +352,7 @@ static int cb_azure_kusto_ingest(struct flb_config *config, void *data)
 
         flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest ::: before starting kusto queued ingestion %s", file->fsf->name);
 
-        ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), payload, flb_sds_len(payload));
+        ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), payload, flb_sds_len(payload), NULL);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "Failed to ingest data to Azure Blob");
         }
@@ -389,11 +389,6 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
     int is_compressed = FLB_FALSE;
     flb_sds_t tag_sds = flb_sds_create_len(tag, tag_len);
 
-    /*if (pthread_mutex_lock(&ctx->buffer_mutex)) {
-        flb_plg_error(ctx->ins, "error unlocking mutex");
-        return -1;
-    }*/
-
     /* Create buffer */
     ret = construct_request_buffer(ctx, new_data, upload_file, &buffer, &buffer_size);
     if (ret < 0) {
@@ -426,13 +421,8 @@ static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
         final_payload_size = flb_sds_len(payload);
     }
 
-    /*if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
-        flb_plg_error(ctx->ins, "error unlocking mutex");
-        return -1;
-    }*/
-
     // Call azure_kusto_queued_ingestion to ingest the payload
-    ret = azure_kusto_queued_ingestion(ctx, tag_sds, tag_len, final_payload, final_payload_size);
+    ret = azure_kusto_queued_ingestion(ctx, tag_sds, tag_len, final_payload, final_payload_size, upload_file);
     if (ret != 0) {
         flb_plg_error(ctx->ins, "Failed to ingest data to Azure Kusto");
         flb_sds_destroy(tag_sds);
@@ -471,7 +461,6 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
     if (ctx->buffering_enabled == FLB_TRUE) {
         ctx->ins = ins;
         ctx->retry_time = 0;
-        ctx->store_dir_limit_size = FLB_AZURE_KUSTO_BUFFER_DIR_MAX_SIZE;
         ctx->has_old_buffers = azure_kusto_store_has_data(ctx);
 
         /* Initialize local storage */
@@ -524,7 +513,7 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
 
     /* Create oauth2 context */
     ctx->o =
-            flb_oauth2_create(ctx->config, ctx->oauth_url, FLB_AZURE_KUSTO_TOKEN_REFRESH);
+        flb_oauth2_create(ctx->config, ctx->oauth_url, FLB_AZURE_KUSTO_TOKEN_REFRESH);
     if (!ctx->o) {
         flb_plg_error(ctx->ins, "cannot create oauth2 context");
         return -1;
@@ -868,34 +857,40 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                 goto error;
             }
 
-            /* Send upload directly without upload queue */
+            /* ingest to kusto */
             ret = ingest_to_kusto_ext(ctx, json, upload_file,
                                       event_chunk->tag,
                                       tag_len);
 
             if (ret == 0){
-                if (pthread_mutex_lock(&ctx->buffer_mutex)) {
-                    flb_plg_error(ctx->ins, "error locking mutex");
-                    ret = FLB_ERROR;
-                    goto error;
-                }
-                ret = azure_kusto_store_file_delete(ctx, upload_file);
-                if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
-                    flb_plg_error(ctx->ins, "error unlocking mutex");
-                    ret = FLB_ERROR;
-                    goto error;
-                }
-                if (ret != 0){
-                    /* file coudn't be deleted */
-                    ret = FLB_ERROR;
-                    goto error;
-                } else{
-                    /* file deleted successfully */
+                if (ctx->buffering_enabled == FLB_TRUE && ctx->buffer_file_delete_early == FLB_TRUE){
+                    flb_plg_debug(ctx->ins, "buffer file already deleted after blob creation");
                     ret = FLB_OK;
                     goto cleanup;
+                }else{
+                    if (pthread_mutex_lock(&ctx->buffer_mutex)) {
+                        flb_plg_error(ctx->ins, "error locking mutex");
+                        ret = FLB_ERROR;
+                        goto error;
+                    }
+                    ret = azure_kusto_store_file_delete(ctx, upload_file);
+                    if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
+                        flb_plg_error(ctx->ins, "error unlocking mutex");
+                        ret = FLB_ERROR;
+                        goto error;
+                    }
+                    if (ret != 0){
+                        /* file coudn't be deleted */
+                        ret = FLB_ERROR;
+                        goto error;
+                    } else{
+                        /* file deleted successfully */
+                        ret = FLB_OK;
+                        goto cleanup;
+                    }
                 }
             }else{
-                flb_plg_error(ctx->ins, "unable to ingest data into kusto ");
+                flb_plg_error(ctx->ins, "unable to ingest data into kusto : retrying");
                 ret = FLB_RETRY;
                 goto cleanup;
             }
@@ -968,7 +963,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             goto error;
         }
 
-        ret = azure_kusto_queued_ingestion(ctx, event_chunk->tag, tag_len, final_payload, final_payload_size);
+        ret = azure_kusto_queued_ingestion(ctx, event_chunk->tag, tag_len, final_payload, final_payload_size, NULL);
         flb_plg_trace(ctx->ins, "after kusto queued ingestion %d", ret);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "cannot perform queued ingestion");
@@ -1099,6 +1094,14 @@ static struct flb_config_map config_map[] = {
         {FLB_CONFIG_MAP_STR, "azure_kusto_buffer_key", "key",0, FLB_TRUE,
                              offsetof(struct flb_azure_kusto, azure_kusto_buffer_key),
         "Set the azure kusto buffer key which needs to be specified when using multiple instances of azure kusto output plugin and buffering is enabled"
+        },
+        {FLB_CONFIG_MAP_SIZE, "store_dir_limit_size", FLB_AZURE_KUSTO_BUFFER_DIR_MAX_SIZE,0, FLB_TRUE,
+                offsetof(struct flb_azure_kusto, store_dir_limit_size),
+        "Set the max size of the buffer directory. Default is 8GB"
+        },
+        {FLB_CONFIG_MAP_BOOL, "buffer_file_delete_early", "false",0, FLB_TRUE,
+         offsetof(struct flb_azure_kusto, buffer_file_delete_early),
+        "Whether to delete the buffered file early after successful blob creation. Default is false"
         },
         /* EOF */
         {0}};

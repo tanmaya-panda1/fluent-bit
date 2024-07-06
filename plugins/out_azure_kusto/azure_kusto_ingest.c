@@ -28,6 +28,7 @@
 #include <msgpack.h>
 
 #include "azure_kusto_ingest.h"
+#include "azure_kusto_store.h"
 
 /* not really uuid but a random string in the form 00000000-0000-0000-0000-000000000000 */
 static char *generate_uuid()
@@ -545,7 +546,7 @@ static flb_sds_t azure_kusto_create_blob_id(struct flb_azure_kusto *ctx, flb_sds
 }
 
 int azure_kusto_queued_ingestion(struct flb_azure_kusto *ctx, flb_sds_t tag,
-                                 size_t tag_len, flb_sds_t payload, size_t payload_size)
+                                 size_t tag_len, flb_sds_t payload, size_t payload_size, struct azure_kusto_file *upload_file )
 {
     int ret = -1;
     flb_sds_t blob_id;
@@ -570,6 +571,21 @@ int azure_kusto_queued_ingestion(struct flb_azure_kusto *ctx, flb_sds_t tag,
         blob_uri = azure_kusto_create_blob(ctx, blob_id, payload, payload_size);
 
         if (blob_uri) {
+            if (ctx->buffering_enabled == FLB_TRUE && upload_file != NULL && ctx->buffer_file_delete_early == FLB_TRUE) {
+                flb_plg_debug(ctx->ins, "buffering enabled, ingest to blob successfully done and now deleting the buffer file %s", blob_id);
+                if (pthread_mutex_lock(&ctx->buffer_mutex)) {
+                    flb_plg_error(ctx->ins, "error locking mutex");
+                    return -1;
+                }
+                if (azure_kusto_store_file_delete(ctx, upload_file) != 0) {
+                    flb_plg_error(ctx->ins, "blob creation successful but error deleting buffer file %s", blob_id);
+                }
+
+                if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
+                    flb_plg_error(ctx->ins, "error unlocking mutex");
+                    return -1;
+                }
+            }
             ret = azure_kusto_enqueue_ingestion(ctx, blob_uri, payload_size);
 
             if (ret != 0) {
