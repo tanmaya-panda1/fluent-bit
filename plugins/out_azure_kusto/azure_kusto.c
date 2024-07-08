@@ -487,8 +487,6 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
             return -1;
         }
 
-        flb_stream_disable_flags(&ctx->u->base, FLB_IO_ASYNC);
-
         ctx->timer_created = FLB_FALSE;
         ctx->timer_ms = (int) (ctx->upload_timeout / 6) * 1000;
         flb_plg_info(ctx->ins, "Using upload size %lu bytes", ctx->file_size);
