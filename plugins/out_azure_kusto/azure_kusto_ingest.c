@@ -164,9 +164,8 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
 
     flb_plg_debug(ctx->ins,"inside blob after upstream ha node get");
     u_node->u->base.net.connect_timeout = ctx->ingestion_endpoint_connect_timeout;
-    if(ctx->buffering_enabled == FLB_TRUE){
-        flb_stream_disable_async_mode(&ctx->u->base);
-    }
+    u_node->u->base.flags &= ~(FLB_IO_ASYNC);
+    flb_plg_error(ctx->ins, "azure_kusto_create_blob -- async flag is %d", flb_stream_is_async(&ctx->u->base));
 
     flb_plg_debug(ctx->ins,"inside blob after upstream ha node get  :: setting ingestion timeout");
     if (!u_node->u) {
@@ -425,9 +424,7 @@ static int azure_kusto_enqueue_ingestion(struct flb_azure_kusto *ctx, flb_sds_t 
     }
     
     u_node->u->base.net.connect_timeout = ctx->ingestion_endpoint_connect_timeout;
-    if(ctx->buffering_enabled == FLB_TRUE){
-        flb_stream_disable_async_mode(&ctx->u->base);
-    }
+    u_node->u->base.flags &= ~(FLB_IO_ASYNC);
 
     u_conn = flb_upstream_conn_get(u_node->u);
 

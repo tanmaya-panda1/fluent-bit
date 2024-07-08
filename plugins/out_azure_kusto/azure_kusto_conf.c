@@ -467,10 +467,6 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
     flb_plg_debug(ctx->ins, "check if the latest changes are there 4");
     flb_plg_debug(ctx->ins, "generated random integer %d", generated_random_integer);
 
-    if(ctx->buffering_enabled == FLB_TRUE){
-        flb_stream_disable_async_mode(&ctx->u->base);
-    }
-
     now = time(NULL);
 
     /* check if we have all resources and they are not stale */

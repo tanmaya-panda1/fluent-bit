@@ -138,13 +138,12 @@ flb_sds_t execute_ingest_csl_command(struct flb_azure_kusto *ctx, const char *cs
     flb_plg_debug(ctx->ins, "Logging attributes of flb_azure_kusto_resources:");
     flb_plg_debug(ctx->ins, "blob_ha: %p", ctx->resources->blob_ha);
     flb_plg_debug(ctx->ins, "queue_ha: %p", ctx->resources->queue_ha);
-    flb_plg_debug(ctx->ins, "identity_token: %s", ctx->resources->identity_token);
     flb_plg_debug(ctx->ins, "load_time: %lu", ctx->resources->load_time);
 
     ctx->u->base.net.connect_timeout = ctx->ingestion_endpoint_connect_timeout;
-    if(ctx->buffering_enabled == FLB_TRUE){
-        flb_stream_disable_async_mode(&ctx->u->base);
-    }
+    //flb_stream_disable_flags(&ctx->u->base, FLB_IO_ASYNC);
+    ctx->u->base.flags &= ~(FLB_IO_ASYNC);
+    flb_plg_error(ctx->ins, "execute_ingest_csl_command -- async flag is %d", flb_stream_is_async(&ctx->u->base));
 
     /* Get upstream connection */
     u_conn = flb_upstream_conn_get(ctx->u);
@@ -488,6 +487,8 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
             return -1;
         }
 
+        flb_stream_disable_flags(&ctx->u->base, FLB_IO_ASYNC);
+
         ctx->timer_created = FLB_FALSE;
         ctx->timer_ms = (int) (ctx->upload_timeout / 6) * 1000;
         flb_plg_info(ctx->ins, "Using upload size %lu bytes", ctx->file_size);
@@ -512,14 +513,13 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
      * Create upstream context for Kusto Ingestion endpoint
      */
     ctx->u = flb_upstream_create_url(config, ctx->ingestion_endpoint, io_flags, ins->tls);
+    flb_stream_disable_flags(&ctx->u->base, FLB_IO_ASYNC);
     if (!ctx->u) {
         flb_plg_error(ctx->ins, "upstream creation failed");
         return -1;
     }
 
-    if(ctx->buffering_enabled == FLB_TRUE){
-        flb_stream_disable_async_mode(&ctx->u->base);
-    }
+    flb_plg_error(ctx->ins, "async flag is %d", flb_stream_is_async(&ctx->u->base));
 
     /* Create oauth2 context */
     ctx->o =
