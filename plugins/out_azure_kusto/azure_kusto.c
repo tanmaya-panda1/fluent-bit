@@ -141,7 +141,10 @@ flb_sds_t execute_ingest_csl_command(struct flb_azure_kusto *ctx, const char *cs
     flb_plg_debug(ctx->ins, "identity_token: %s", ctx->resources->identity_token);
     flb_plg_debug(ctx->ins, "load_time: %lu", ctx->resources->load_time);
 
-    ctx->u->base.net.connect_timeout = ctx->ingestion_endpoint_connect_timeout ;
+    ctx->u->base.net.connect_timeout = ctx->ingestion_endpoint_connect_timeout;
+    if(ctx->buffering_enabled == FLB_TRUE){
+        flb_stream_disable_async_mode(&ctx->u->base);
+    }
 
     /* Get upstream connection */
     u_conn = flb_upstream_conn_get(ctx->u);
