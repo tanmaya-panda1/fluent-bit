@@ -520,6 +520,8 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
     }
     flb_output_upstream_set(ctx->u, ins);
 
+    flb_stream_disable_async_mode(&ctx->u->base);
+
     flb_plg_debug(ctx->ins, "azure kusto init completed");
 
     return 0;
@@ -780,6 +782,27 @@ static void flush_init(void *out_context, struct flb_config *config)
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
     }
+
+    /*
+    * create a timer that will run periodically and check if uploads
+    * are ready for completion
+    * this is created once on the first flush
+    */
+    /*if (ctx->timer_created == FLB_FALSE) {
+        flb_plg_debug(ctx->ins,
+                      "Creating upload timer with frequency %ds",
+                      ctx->timer_ms / 1000);
+
+        sched = flb_sched_ctx_get();
+
+        ret = flb_sched_timer_cb_create(sched, FLB_SCHED_TIMER_CB_PERM,
+                                            ctx->timer_ms, cb_azure_kusto_flush, ctx, NULL);
+        if (ret == -1) {
+            flb_plg_error(ctx->ins, "Failed to create upload timer");
+            FLB_OUTPUT_RETURN(FLB_RETRY);
+        }
+        ctx->timer_created = FLB_TRUE;
+    }*/
 }
 
 static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,

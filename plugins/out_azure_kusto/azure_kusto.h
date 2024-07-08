@@ -108,6 +108,9 @@ struct flb_azure_kusto {
     flb_sds_t oauth_url;
     struct flb_oauth2 *o;
 
+    int timer_created;
+    int timer_ms;
+
     /* mutex for acquiring oauth tokens */
     pthread_mutex_t token_mutex;
 
