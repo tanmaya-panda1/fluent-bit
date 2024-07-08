@@ -298,7 +298,7 @@ static int construct_request_buffer(struct flb_azure_kusto *ctx, flb_sds_t new_d
 }
 
 
-static int cb_azure_kusto_ingest(struct flb_config *config, void *data)
+static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
 {
     struct flb_azure_kusto *ctx = data;
     struct azure_kusto_file *file = NULL;
@@ -313,7 +313,7 @@ static int cb_azure_kusto_ingest(struct flb_config *config, void *data)
     flb_sds_t tag_sds;
 
     flb_plg_debug(ctx->ins, "Running upload timer callback (cb_azure_kusto_ingest)..");
-
+    flb_plg_debug(ctx->ins, "inside ctx : database name is %s", ctx->database_name);
     now = time(NULL);
 
     /* Check all chunks and see if any have timed out */
@@ -347,7 +347,7 @@ static int cb_azure_kusto_ingest(struct flb_config *config, void *data)
         ret = azure_kusto_load_ingestion_resources(ctx, config);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "cannot load ingestion resources");
-            return -1;
+            //return -1;
         }
 
         flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest ::: before starting kusto queued ingestion %s", file->fsf->name);
@@ -371,7 +371,7 @@ static int cb_azure_kusto_ingest(struct flb_config *config, void *data)
         }
     }
     flb_plg_debug(ctx->ins, "Exited upload timer callback (cb_azure_kusto_ingest)..");
-    return ret;
+    //return ret;
 }
 
 /* ingest data to Azure Kusto */
@@ -484,6 +484,9 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
             flb_plg_error(ctx->ins, "Max total_file_size must be lower than %ld bytes", MAX_FILE_SIZE);
             return -1;
         }
+
+        ctx->timer_created = FLB_FALSE;
+        ctx->timer_ms = (int) (ctx->upload_timeout / 6) * 1000;
         flb_plg_info(ctx->ins, "Using upload size %lu bytes", ctx->file_size);
     }
 
@@ -511,6 +514,10 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
         return -1;
     }
 
+    if(ctx->buffering_enabled == FLB_TRUE){
+        flb_stream_disable_async_mode(&ctx->u->base);
+    }
+
     /* Create oauth2 context */
     ctx->o =
             flb_oauth2_create(ctx->config, ctx->oauth_url, FLB_AZURE_KUSTO_TOKEN_REFRESH);
@@ -519,8 +526,6 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
         return -1;
     }
     flb_output_upstream_set(ctx->u, ins);
-
-    flb_stream_disable_async_mode(&ctx->u->base);
 
     flb_plg_debug(ctx->ins, "azure kusto init completed");
 
@@ -764,6 +769,7 @@ static void flush_init(void *out_context, struct flb_config *config)
 {
     int ret;
     struct flb_azure_kusto *ctx = out_context;
+    struct flb_sched *sched;
 
     /* clean up any old buffers found on startup */
     if (ctx->has_old_buffers == FLB_TRUE) {
@@ -772,7 +778,8 @@ static void flush_init(void *out_context, struct flb_config *config)
                      "executions to kusto; buffer=%s",
                      ctx->fs->root_path);
         ctx->has_old_buffers = FLB_FALSE;
-        ret = cb_azure_kusto_ingest(config, ctx);
+        cb_azure_kusto_ingest(config, ctx);
+        /*ret = cb_azure_kusto_ingest(config, ctx);
         if (ret < 0) {
             ctx->has_old_buffers = FLB_TRUE;
             flb_plg_error(ctx->ins,
@@ -780,7 +787,7 @@ static void flush_init(void *out_context, struct flb_config *config)
                           "from previous executions; will retry. Buffer=%s",
                           ctx->fs->root_path);
             FLB_OUTPUT_RETURN(FLB_RETRY);
-        }
+        }*/
     }
 
     /*
@@ -788,7 +795,7 @@ static void flush_init(void *out_context, struct flb_config *config)
     * are ready for completion
     * this is created once on the first flush
     */
-    /*if (ctx->timer_created == FLB_FALSE) {
+    if (ctx->timer_created == FLB_FALSE) {
         flb_plg_debug(ctx->ins,
                       "Creating upload timer with frequency %ds",
                       ctx->timer_ms / 1000);
@@ -796,13 +803,13 @@ static void flush_init(void *out_context, struct flb_config *config)
         sched = flb_sched_ctx_get();
 
         ret = flb_sched_timer_cb_create(sched, FLB_SCHED_TIMER_CB_PERM,
-                                            ctx->timer_ms, cb_azure_kusto_flush, ctx, NULL);
+                                            ctx->timer_ms, cb_azure_kusto_ingest, ctx, NULL);
         if (ret == -1) {
             flb_plg_error(ctx->ins, "Failed to create upload timer");
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
         ctx->timer_created = FLB_TRUE;
-    }*/
+    }
 }
 
 static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
