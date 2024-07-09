@@ -505,7 +505,7 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
     pthread_mutex_init(&ctx->token_mutex, NULL);
     pthread_mutex_init(&ctx->resources_mutex, NULL);
     pthread_mutex_init(&ctx->blob_mutex, NULL);
-    pthread_mutex_init(&ctx->buffer_mutex, NULL);
+    //pthread_mutex_init(&ctx->buffer_mutex, NULL);
 
     /*
      * Create upstream context for Kusto Ingestion endpoint
@@ -899,17 +899,17 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                     ret = FLB_OK;
                     goto cleanup;
                 }else{
-                    if (pthread_mutex_lock(&ctx->buffer_mutex)) {
+                    /*if (pthread_mutex_lock(&ctx->buffer_mutex)) {
                         flb_plg_error(ctx->ins, "error locking mutex");
                         ret = FLB_ERROR;
                         goto error;
-                    }
+                    }*/
                     ret = azure_kusto_store_file_delete(ctx, upload_file);
-                    if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
+                    /*if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
                         flb_plg_error(ctx->ins, "error unlocking mutex");
                         ret = FLB_ERROR;
                         goto error;
-                    }
+                    }*/
                     if (ret != 0){
                         /* file coudn't be deleted */
                         ret = FLB_ERROR;
@@ -927,21 +927,21 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             }
         }
 
-        if (pthread_mutex_lock(&ctx->buffer_mutex)) {
+        /*if (pthread_mutex_lock(&ctx->buffer_mutex)) {
             flb_plg_error(ctx->ins, "error locking mutex");
             ret = FLB_ERROR;
             goto error;
-        }
+        }*/
 
         /* Buffer current chunk in filesystem and wait for next chunk from engine */
         ret = buffer_chunk(ctx, upload_file, json, json_size,
                            event_chunk->tag, tag_len);
 
-        if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
+        /*if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
             flb_plg_error(ctx->ins, "error unlocking mutex");
             ret = FLB_ERROR;
             goto error;
-        }
+        }*/
 
         if (ret == 0) {
             flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
@@ -1047,7 +1047,7 @@ static int cb_azure_kusto_exit(void *data, struct flb_config *config)
     pthread_mutex_destroy(&ctx->resources_mutex);
     pthread_mutex_destroy(&ctx->token_mutex);
     pthread_mutex_destroy(&ctx->blob_mutex);
-    pthread_mutex_destroy(&ctx->buffer_mutex);
+    //pthread_mutex_destroy(&ctx->buffer_mutex);
 
     azure_kusto_store_exit(ctx);
 
