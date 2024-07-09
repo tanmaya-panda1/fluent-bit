@@ -123,7 +123,7 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
     flb_sds_t name;
     struct flb_fstore_file *fsf;
     size_t space_remaining;
-    flb_sds_t path_sds;
+    // flb_sds_t path_sds;
 
     if (ctx->store_dir_limit_size > 0 && ctx->current_buffer_size + bytes >= ctx->store_dir_limit_size) {
         flb_plg_error(ctx->ins, "Buffer is full: current_buffer_size=%zu, new_data=%zu, store_dir_limit_size=%zu bytes",
@@ -170,7 +170,7 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         azure_kusto_file->create_time = time(NULL);
         azure_kusto_file->size = 0; // Initialize size to 0
 
-        path_sds = flb_sds_create(ctx->stream_active->path);
+        /*path_sds = flb_sds_create(ctx->stream_active->path);
         if (path_sds == NULL) {
             flb_plg_error(ctx->ins, "failed to create path_sds");
             flb_free(azure_kusto_file);
@@ -198,7 +198,7 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
             return -1;
         }
 
-        azure_kusto_file->file_path = path_sds;
+        azure_kusto_file->file_path = path_sds;*/
 
         /* Use fstore opaque 'data' reference to keep our context */
         fsf->data = azure_kusto_file;
@@ -365,7 +365,7 @@ int azure_kusto_store_exit(struct flb_azure_kusto *ctx)
             fsf = mk_list_entry(f_head, struct flb_fstore_file, _head);
             if (fsf->data != NULL) {
                 azure_kusto_file = fsf->data;
-                flb_sds_destroy(azure_kusto_file->file_path);
+                //flb_sds_destroy(azure_kusto_file->file_path);
                 flb_free(azure_kusto_file);
             }
         }
@@ -438,10 +438,10 @@ void azure_kusto_file_cleanup(struct azure_kusto_file *file)
     }
 
     // Free the file path if it was dynamically allocated
-    if (file->file_path != NULL) {
+    /*if (file->file_path != NULL) {
         flb_sds_destroy(file->file_path);
         file->file_path = NULL;
-    }
+    }*/
 
     // If there are other dynamically allocated members, free them here
     // For now, we only free file_path as per the given struct
@@ -452,6 +452,20 @@ void azure_kusto_file_cleanup(struct azure_kusto_file *file)
 
 int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file)
 {
+    struct flb_fstore_file *fsf;
+
+    fsf = azure_kusto_file->fsf;
+    ctx->current_buffer_size -= azure_kusto_file->size;
+
+    /* permanent deletion */
+    flb_fstore_file_delete(ctx->fs, fsf);
+    flb_free(azure_kusto_file);
+
+    return 0;
+}
+
+int azure_kusto_store_file_delete_ext_latest(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file)
+{
     int ret;
     struct flb_fstore_file *fsf;
     int fd;
@@ -461,6 +475,8 @@ int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kust
         // Check if the file exists before attempting to open it
         if (access(azure_kusto_file->file_path, F_OK) == -1) {
             flb_plg_warn(ctx->ins, "File does not exist");
+            //azure_kusto_file_cleanup(azure_kusto_file);
+            //flb_free(azure_kusto_file);
             return 0;
         }
 

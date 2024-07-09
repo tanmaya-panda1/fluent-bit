@@ -164,6 +164,11 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
 
     flb_plg_debug(ctx->ins,"inside blob after upstream ha node get");
     u_node->u->base.net.connect_timeout = ctx->ingestion_endpoint_connect_timeout;
+    if (ctx->buffering_enabled ==  FLB_TRUE){
+        u_node->u->base.flags &= ~(FLB_IO_ASYNC);
+    }
+    flb_plg_debug(ctx->ins, "azure_kusto_create_blob -- async flag is %d", flb_stream_is_async(&ctx->u->base));
+
     flb_plg_debug(ctx->ins,"inside blob after upstream ha node get  :: setting ingestion timeout");
     if (!u_node->u) {
         flb_plg_error(ctx->ins, "upstream data is null");
@@ -421,6 +426,9 @@ static int azure_kusto_enqueue_ingestion(struct flb_azure_kusto *ctx, flb_sds_t 
     }
 
     u_node->u->base.net.connect_timeout = ctx->ingestion_endpoint_connect_timeout;
+    if (ctx->buffering_enabled ==  FLB_TRUE){
+        u_node->u->base.flags &= ~(FLB_IO_ASYNC);
+    }
 
     u_conn = flb_upstream_conn_get(u_node->u);
 
@@ -573,18 +581,18 @@ int azure_kusto_queued_ingestion(struct flb_azure_kusto *ctx, flb_sds_t tag,
         if (blob_uri) {
             if (ctx->buffering_enabled == FLB_TRUE && upload_file != NULL && ctx->buffer_file_delete_early == FLB_TRUE) {
                 flb_plg_debug(ctx->ins, "buffering enabled, ingest to blob successfully done and now deleting the buffer file %s", blob_id);
-                if (pthread_mutex_lock(&ctx->buffer_mutex)) {
+                /*if (pthread_mutex_lock(&ctx->buffer_mutex)) {
                     flb_plg_error(ctx->ins, "error locking mutex");
                     return -1;
-                }
+                }*/
                 if (azure_kusto_store_file_delete(ctx, upload_file) != 0) {
                     flb_plg_error(ctx->ins, "blob creation successful but error deleting buffer file %s", blob_id);
                 }
 
-                if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
+                /*if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
                     flb_plg_error(ctx->ins, "error unlocking mutex");
                     return -1;
-                }
+                }*/
             }
             ret = azure_kusto_enqueue_ingestion(ctx, blob_uri, payload_size);
 
