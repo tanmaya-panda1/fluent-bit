@@ -299,6 +299,112 @@ static int construct_request_buffer(struct flb_azure_kusto *ctx, flb_sds_t new_d
     return 0;
 }
 
+static int ingest_all_chunks(struct flb_azure_kusto *ctx)
+{
+    struct azure_kusto_file *chunk;
+    struct mk_list *tmp;
+    struct mk_list *head;
+    struct mk_list *f_head;
+    struct flb_fstore_file *fsf;
+    struct flb_fstore_stream *fs_stream;
+    flb_sds_t payload = NULL;
+    void *final_payload = NULL;
+    size_t final_payload_size = 0;
+    char *buffer = NULL;
+    size_t buffer_size;
+    int ret;
+    int is_compressed = FLB_FALSE;
+    flb_sds_t tag_sds;
+
+    mk_list_foreach(head, &ctx->fs->streams) {
+        /* skip multi upload stream */
+        fs_stream = mk_list_entry(head, struct flb_fstore_stream, _head);
+        if (fs_stream == ctx->stream_upload) {
+            continue;
+        }
+
+        mk_list_foreach_safe(f_head, tmp, &fs_stream->files) {
+            fsf = mk_list_entry(f_head, struct flb_fstore_file, _head);
+            chunk = fsf->data;
+
+            /* Locked chunks are being processed, skip */
+            if (chunk->locked == FLB_TRUE) {
+                continue;
+            }
+
+            if (chunk->failures >= MAX_UPLOAD_ERRORS) {
+                flb_plg_warn(ctx->ins,
+                             "Chunk for tag %s failed to send %i times, "
+                             "will not retry",
+                             (char *) fsf->meta_buf, MAX_UPLOAD_ERRORS);
+                flb_fstore_file_inactive(ctx->fs, fsf);
+                continue;
+            }
+
+            ret = construct_request_buffer(ctx, NULL, chunk,
+                                           &buffer, &buffer_size);
+            if (ret < 0) {
+                flb_plg_error(ctx->ins,
+                              "Could not construct request buffer for %s",
+                              chunk->file_path);
+                return -1;
+            }
+
+            payload = flb_sds_create_len(buffer, buffer_size);
+            tag_sds = flb_sds_create(fsf->meta_buf);
+            flb_free(buffer);
+
+            /*payload = flb_sds_create_len(buffer, buffer_size);
+            flb_free(buffer);*/
+
+            /* Compress the JSON payload */
+            if (ctx->compression_enabled == FLB_TRUE) {
+                ret = flb_gzip_compress((void *) payload, flb_sds_len(payload),
+                                        &final_payload, &final_payload_size);
+                if (ret != 0) {
+                    flb_plg_error(ctx->ins,
+                                  "cannot gzip payload");
+                    flb_sds_destroy(payload);
+                    flb_sds_destroy(tag_sds);
+                    //pthread_mutex_unlock(&ctx->buffer_mutex);
+                    return -1;
+                }
+                else {
+                    is_compressed = FLB_TRUE;
+                    flb_plg_debug(ctx->ins, "enabled payload gzip compression");
+                    /* JSON buffer will be cleared at cleanup: */
+                }
+            } else {
+                final_payload = payload;
+                final_payload_size = flb_sds_len(payload);
+            }
+
+            // Call azure_kusto_queued_ingestion to ingest the payload
+            ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), final_payload, final_payload_size, chunk);
+            if (ret != 0) {
+                flb_plg_error(ctx->ins, "Failed to ingest data to Azure Kusto");
+                flb_sds_destroy(tag_sds);
+                flb_sds_destroy(payload);
+                if (is_compressed) {
+                    flb_free(final_payload);
+                }
+                return -1;
+            }
+
+            flb_sds_destroy(tag_sds);
+            flb_sds_destroy(payload);
+            if (is_compressed) {
+                flb_free(final_payload);
+            }
+
+            /* data was sent successfully- delete the local buffer */
+            azure_kusto_store_file_delete(ctx, chunk);
+        }
+    }
+
+    return 0;
+}
+
 
 static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
 {
@@ -307,12 +413,15 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
     struct flb_fstore_file *fsf;
     char *buffer = NULL;
     size_t buffer_size = 0;
+    void *final_payload = NULL;
+    size_t final_payload_size = 0;
     struct mk_list *tmp;
     struct mk_list *head;
     int ret;
     time_t now;
     flb_sds_t payload;
     flb_sds_t tag_sds;
+    int is_compressed = FLB_FALSE;
 
     flb_plg_debug(ctx->ins, "Running upload timer callback (cb_azure_kusto_ingest)..");
     flb_plg_debug(ctx->ins, "inside ctx : database name is %s", ctx->database_name);
@@ -341,8 +450,34 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
             continue;
         }
 
-        payload = flb_sds_create(buffer);
+        payload = flb_sds_create_len(buffer, buffer_size);
         tag_sds = flb_sds_create(fsf->meta_buf);
+        //flb_free(buffer);
+
+        /*payload = flb_sds_create_len(buffer, buffer_size);
+        flb_free(buffer);*/
+
+        /* Compress the JSON payload */
+        if (ctx->compression_enabled == FLB_TRUE) {
+            ret = flb_gzip_compress((void *) payload, flb_sds_len(payload),
+                                    &final_payload, &final_payload_size);
+            if (ret != 0) {
+                flb_plg_error(ctx->ins,
+                              "cannot gzip payload");
+                flb_sds_destroy(payload);
+                flb_sds_destroy(tag_sds);
+                //pthread_mutex_unlock(&ctx->buffer_mutex);
+                //return -1;
+            }
+            else {
+                is_compressed = FLB_TRUE;
+                flb_plg_debug(ctx->ins, "enabled payload gzip compression");
+                /* JSON buffer will be cleared at cleanup: */
+            }
+        } else {
+            final_payload = payload;
+            final_payload_size = flb_sds_len(payload);
+        }
 
         flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest ::: tag of the file %s", tag_sds);
 
@@ -367,6 +502,9 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
         flb_free(buffer);
         flb_sds_destroy(payload);
         flb_sds_destroy(tag_sds);
+        if (is_compressed) {
+            flb_free(final_payload);
+        }
         if (ret != 0) {
             flb_plg_error(ctx->ins, "Could not send chunk with tag %s",
                           (char *) fsf->meta_buf);
@@ -1032,9 +1170,18 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 static int cb_azure_kusto_exit(void *data, struct flb_config *config)
 {
     struct flb_azure_kusto *ctx = data;
+    int ret = -1;
 
     if (!ctx) {
         return -1;
+    }
+
+    if (azure_kusto_store_has_data(ctx) == FLB_TRUE) {
+        flb_plg_info(ctx->ins, "Sending all locally buffered data to S3");
+        ret = ingest_all_chunks(ctx);
+        if (ret < 0) {
+            flb_plg_error(ctx->ins, "Could not send all chunks on exit");
+        }
     }
 
     if (ctx->u) {
