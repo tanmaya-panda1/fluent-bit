@@ -473,8 +473,7 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
                               "cannot gzip payload");
                 flb_sds_destroy(payload);
                 flb_sds_destroy(tag_sds);
-                //pthread_mutex_unlock(&ctx->buffer_mutex);
-                //return -1;
+                return;
             }
             else {
                 is_compressed = FLB_TRUE;
@@ -491,7 +490,7 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
         ret = azure_kusto_load_ingestion_resources(ctx, config);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "cannot load ingestion resources");
-            //return -1;
+            return;
         }
 
         flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest ::: before starting kusto queued ingestion %s", file->fsf->name);
@@ -499,11 +498,14 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
         ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), final_payload, final_payload_size, NULL);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "Failed to ingest data to Azure Blob");
+            return;
         }
 
+        ret = azure_kusto_store_file_delete(ctx, file);
         if (ret == 0) {
             flb_plg_debug(ctx->ins, "deleted successfully ingested file %s", fsf->name);
-            flb_fstore_file_delete(ctx->fs, fsf);
+        }else{
+            flb_plg_error(ctx->ins, "failed to delete ingested file %s", fsf->name);
         }
 
         flb_free(buffer);
@@ -512,13 +514,8 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
         if (is_compressed) {
             flb_free(final_payload);
         }
-        if (ret != 0) {
-            flb_plg_error(ctx->ins, "Could not send chunk with tag %s",
-                          (char *) fsf->meta_buf);
-        }
     }
     flb_plg_debug(ctx->ins, "Exited upload timer callback (cb_azure_kusto_ingest)..");
-    //return ret;
 }
 
 /* ingest data to Azure Kusto */
@@ -926,8 +923,7 @@ static void flush_init(void *out_context, struct flb_config *config)
                      "executions to kusto; buffer=%s",
                      ctx->fs->root_path);
         ctx->has_old_buffers = FLB_FALSE;
-        cb_azure_kusto_ingest(config, ctx);
-        /*ret = cb_azure_kusto_ingest(config, ctx);
+        ret = ingest_all_chunks(ctx, config);
         if (ret < 0) {
             ctx->has_old_buffers = FLB_TRUE;
             flb_plg_error(ctx->ins,
@@ -935,7 +931,7 @@ static void flush_init(void *out_context, struct flb_config *config)
                           "from previous executions; will retry. Buffer=%s",
                           ctx->fs->root_path);
             FLB_OUTPUT_RETURN(FLB_RETRY);
-        }*/
+        }
     }
 
     /*
