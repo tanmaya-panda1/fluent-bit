@@ -513,7 +513,81 @@ static int azure_kusto_enqueue_ingestion(struct flb_azure_kusto *ctx, flb_sds_t 
     return ret;
 }
 
+/* Function to generate a random alphanumeric string */
+static void generate_random_string(char *str, size_t length) {
+    static const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    for (size_t i = 0; i < length - 1; i++) {
+        int key = rand() % (int)(sizeof(charset) - 1);
+        str[i] = charset[key];
+    }
+    str[length - 1] = '\0';
+}
+
 static flb_sds_t azure_kusto_create_blob_id(struct flb_azure_kusto *ctx, flb_sds_t tag,
+                                            size_t tag_len)
+{
+    flb_sds_t blob_id = NULL;
+    struct flb_time tm;
+    uint64_t ms;
+    char *b64tag = NULL;
+    size_t b64_len = 0;
+    char *uuid = NULL;
+    char random_str[17]; // 16 characters + null terminator
+    char timestamp[20]; // Buffer for timestamp
+
+    flb_time_get(&tm);
+    ms = ((tm.tm.tv_sec * 1000) + (tm.tm.tv_nsec / 1000000));
+
+    if (!ctx->rewrite_tag) {
+        b64tag = base64_encode(tag, tag_len, &b64_len);
+        if (b64tag) {
+            /* remove trailing '=' */
+            while (b64_len && b64tag[b64_len - 1] == '=') {
+                b64tag[b64_len - 1] = '\0';
+                b64_len--;
+            }
+        } else {
+            flb_plg_error(ctx->ins, "error encoding tag '%s' to base64", tag);
+            return NULL;
+        }
+    } else {
+        generate_random_string(random_str, sizeof(random_str));
+        b64tag = random_str;
+        b64_len = strlen(random_str);
+    }
+
+    // Get the current timestamp
+    time_t now = time(NULL);
+    struct tm *tm_info = gmtime(&now);
+    strftime(timestamp, sizeof(timestamp), "%Y%m%d%H%M%S", tm_info);
+
+    // Generate a UUID
+    uuid = generate_uuid();
+    if (!uuid) {
+        flb_plg_error(ctx->ins, "error generating UUID");
+        if (!ctx->rewrite_tag && b64tag) {
+            flb_free(b64tag);
+        }
+        return NULL;
+    }
+
+    blob_id = flb_sds_create_size(1024); // Ensure the size is restricted to 1024 characters
+    if (blob_id) {
+        flb_sds_snprintf(&blob_id, 1024, "flb__%s__%s__%s__%llu__%s__%s",
+                         ctx->database_name, ctx->table_name, b64tag, ms, timestamp, uuid);
+    } else {
+        flb_plg_error(ctx->ins, "cannot create blob id buffer");
+    }
+
+    if (!ctx->rewrite_tag && b64tag) {
+        flb_free(b64tag);
+    }
+    flb_free(uuid);
+
+    return blob_id;
+}
+
+static flb_sds_t azure_kusto_create_blob_id_ext(struct flb_azure_kusto *ctx, flb_sds_t tag,
                                             size_t tag_len)
 {
     flb_sds_t blob_id = NULL;

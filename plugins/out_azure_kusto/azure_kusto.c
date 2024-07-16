@@ -1286,6 +1286,10 @@ static struct flb_config_map config_map[] = {
                              offsetof(struct flb_azure_kusto, buffer_file_delete_early),
         "Whether to delete the buffered file early after successful blob creation. Default is false"
         },
+        {FLB_CONFIG_MAP_BOOL, "rewrite_tag", "false",0, FLB_TRUE,
+                offsetof(struct flb_azure_kusto, rewrite_tag),
+        "Whether to delete the buffered file early after successful blob creation. Default is false"
+        },
         /* EOF */
         {0}};
 

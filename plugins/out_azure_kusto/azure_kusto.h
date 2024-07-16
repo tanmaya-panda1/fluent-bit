@@ -131,6 +131,7 @@ struct flb_azure_kusto {
     time_t retry_time;
 
     int buffer_file_delete_early;
+    int rewrite_tag;
 
     int has_old_buffers;
     size_t store_dir_limit_size;
