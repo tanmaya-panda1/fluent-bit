@@ -44,6 +44,12 @@
 #define AZURE_BLOB_AUTH_KEY 0
 #define AZURE_BLOB_AUTH_SAS 1
 
+#define FLB_AZURE_BLOB_BUFFER_DIR_MAX_SIZE "8G"  // 12GB
+#define MAX_UPLOAD_ERRORS 5// 30 minutes
+#define UPLOAD_TIMER_MAX_WAIT 180000
+#define UPLOAD_TIMER_MIN_WAIT 18000
+#define MAX_FILE_SIZE         4000000000 // 4GB
+
 struct flb_azure_blob {
     int auto_create_container;
     int emulator_mode;
@@ -58,6 +64,28 @@ struct flb_azure_blob {
     flb_sds_t date_key;
     flb_sds_t auth_type;
     flb_sds_t sas_token;
+
+    int buffering_enabled;
+    flb_sds_t buffer_dir;
+
+    size_t file_size;
+    time_t upload_timeout;
+    time_t retry_time;
+    int timer_created;
+    int timer_ms;
+
+    flb_sds_t azure_blob_buffer_key;
+    size_t store_dir_limit_size;
+    int buffer_file_delete_early;
+    int rewrite_tag;
+
+    int has_old_buffers;
+    /* track the total amount of buffered data */
+    size_t current_buffer_size;
+    char *store_dir;
+    struct flb_fstore *fs;
+    struct flb_fstore_stream *stream_active;  /* default active stream */
+    struct flb_fstore_stream *stream_upload;
 
     /*
      * Internal use
