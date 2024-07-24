@@ -826,6 +826,7 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
             if (ret == FLB_OK) {
                 flb_plg_debug(ctx->ins, "uploaded file %s successfully", upload_file->fsf->name);
                 azure_blob_store_file_delete(ctx, upload_file);
+                goto cleanup;
             } else {
                 flb_plg_error(ctx->ins, "error uploading file %s", upload_file->fsf->name);
                 goto error;
@@ -872,14 +873,18 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
     if (json) {
         flb_sds_destroy(json);
     }
-
-    FLB_OUTPUT_RETURN(ret);
+    if (final_payload) {
+        flb_free(final_payload); // Ensure final_payload is freed
+    }
+    FLB_OUTPUT_RETURN(FLB_OK);
 
     error:
     if (json) {
         flb_sds_destroy(json);
     }
-
+    if (final_payload) {
+        flb_free(final_payload); // Ensure final_payload is freed in error path
+    }
     FLB_OUTPUT_RETURN(FLB_RETRY);
 }
 
