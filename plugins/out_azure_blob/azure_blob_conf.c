@@ -203,6 +203,11 @@ struct flb_azure_blob *flb_azure_blob_conf_create(struct flb_output_instance *in
 
         ctx->u = flb_upstream_create(config, ctx->real_endpoint, port, io_flags,
                                      ins->tls);
+        if (ctx->buffering_enabled ==  FLB_TRUE){
+            flb_stream_disable_flags(&ctx->u->base, FLB_IO_ASYNC);
+        }
+
+        flb_plg_debug(ctx->ins, "async flag is %d", flb_stream_is_async(&ctx->u->base));
         if (!ctx->u) {
             flb_plg_error(ctx->ins, "cannot create upstream for endpoint '%s'",
                           ctx->real_endpoint);

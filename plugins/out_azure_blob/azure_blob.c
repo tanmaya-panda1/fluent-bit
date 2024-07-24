@@ -144,6 +144,11 @@ static int send_blob(struct flb_config *config,
         return FLB_RETRY;
     }
 
+    if (ctx->buffering_enabled == FLB_TRUE){
+        ctx->u->base.flags &= ~(FLB_IO_ASYNC);
+    }
+    flb_plg_debug(ctx->ins, "send_blob -- async flag is %d", flb_stream_is_async(&ctx->u->base));
+
     /* Get upstream connection */
     u_conn = flb_upstream_conn_get(ctx->u);
     if (!u_conn) {
@@ -284,6 +289,11 @@ static int create_blob(struct flb_azure_blob *ctx, char *name)
         return FLB_RETRY;
     }
 
+    if (ctx->buffering_enabled == FLB_TRUE){
+        ctx->u->base.flags &= ~(FLB_IO_ASYNC);
+    }
+    flb_plg_debug(ctx->ins, "create_blob -- async flag is %d", flb_stream_is_async(&ctx->u->base));
+
     /* Get upstream connection */
     u_conn = flb_upstream_conn_get(ctx->u);
     if (!u_conn) {
@@ -353,6 +363,12 @@ static int create_container(struct flb_azure_blob *ctx, char *name)
     flb_sds_t uri;
     struct flb_http_client *c;
     struct flb_connection *u_conn;
+
+    if (ctx->buffering_enabled == FLB_TRUE){
+        ctx->u->base.flags &= ~(FLB_IO_ASYNC);
+    }
+    flb_plg_debug(ctx->ins, "create_container -- async flag is %d", flb_stream_is_async(&ctx->u->base));
+
 
     /* Get upstream connection */
     u_conn = flb_upstream_conn_get(ctx->u);
@@ -437,6 +453,11 @@ static int ensure_container(struct flb_azure_blob *ctx)
     if (!uri) {
         return FLB_FALSE;
     }
+
+    if (ctx->buffering_enabled == FLB_TRUE){
+        ctx->u->base.flags &= ~(FLB_IO_ASYNC);
+    }
+    flb_plg_debug(ctx->ins, "ensure_container -- async flag is %d", flb_stream_is_async(&ctx->u->base));
 
     /* Get upstream connection */
     u_conn = flb_upstream_conn_get(ctx->u);
@@ -567,6 +588,11 @@ static int send_blob_impl(struct flb_config *config,
         content_encoding = AZURE_BLOB_CE_GZIP;
         content_type = AZURE_BLOB_CT_JSON;
     }
+
+    if (ctx->buffering_enabled == FLB_TRUE){
+        ctx->u->base.flags &= ~(FLB_IO_ASYNC);
+    }
+    flb_plg_debug(ctx->ins, "send_blob_impl -- async flag is %d", flb_stream_is_async(&ctx->u->base));
 
     /* Get upstream connection */
     u_conn = flb_upstream_conn_get(ctx->u);

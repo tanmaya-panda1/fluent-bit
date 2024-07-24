@@ -158,6 +158,11 @@ int azb_block_blob_commit(struct flb_azure_blob *ctx, char *blockid, char *tag,
     struct flb_http_client *c;
     struct flb_connection *u_conn;
 
+    if (ctx->buffering_enabled == FLB_TRUE){
+        ctx->u->base.flags &= ~(FLB_IO_ASYNC);
+    }
+    flb_plg_debug(ctx->ins, "azb_block_blob_commit -- async flag is %d", flb_stream_is_async(&ctx->u->base));
+
     /* Get upstream connection */
     u_conn = flb_upstream_conn_get(ctx->u);
     if (!u_conn) {
