@@ -118,8 +118,8 @@ static int send_blob(struct flb_config *config,
     int content_type = FLB_FALSE;
     uint64_t ms = 0;
     size_t b_sent;
-    void *out_buf;
-    size_t out_size;
+    //void *out_buf;
+    //size_t out_size;
     flb_sds_t uri = NULL;
     flb_sds_t blockid = NULL;
     void *payload_buf;
@@ -155,7 +155,7 @@ static int send_blob(struct flb_config *config,
     }
 
     /* Format the data */
-    ret = azure_blob_format(config, i_ins,
+    /*ret = azure_blob_format(config, i_ins,
                             ctx, NULL,
                             FLB_EVENT_TYPE_LOGS,
                             tag, tag_len,
@@ -166,14 +166,14 @@ static int send_blob(struct flb_config *config,
         flb_sds_destroy(uri);
         flb_free(blockid);
         return FLB_RETRY;
-    }
+    }*/
 
     /* Map buffer */
-    payload_buf = out_buf;
-    payload_size = out_size;
+    payload_buf = data;
+    payload_size = bytes;
 
     if (ctx->compress_gzip == FLB_TRUE || ctx->compress_blob == FLB_TRUE) {
-        ret = flb_gzip_compress((void *) out_buf, out_size,
+        ret = flb_gzip_compress((void *) data, bytes,
                                 &payload_buf, &payload_size);
         if (ret == -1) {
             flb_plg_error(ctx->ins,
@@ -182,7 +182,7 @@ static int send_blob(struct flb_config *config,
         else {
             compressed = FLB_TRUE;
             /* JSON buffer is not longer needed */
-            flb_sds_destroy(out_buf);
+            //flb_sds_destroy(out_buf);
         }
     }
 
@@ -201,7 +201,7 @@ static int send_blob(struct flb_config *config,
                         payload_buf, payload_size, NULL, 0, NULL, 0);
     if (!c) {
         flb_plg_error(ctx->ins, "cannot create HTTP client context");
-        flb_sds_destroy(out_buf);
+        //flb_sds_destroy(out_buf);
         flb_upstream_conn_release(u_conn);
         flb_free(blockid);
         return FLB_RETRY;
@@ -217,7 +217,7 @@ static int send_blob(struct flb_config *config,
 
     /* Release */
     if (compressed == FLB_FALSE) {
-        flb_sds_destroy(out_buf);
+       // flb_sds_destroy(out_buf);
     }
     else {
         flb_free(payload_buf);
@@ -715,6 +715,149 @@ static int buffer_and_send_blob(struct flb_config *config,
 }
 
 static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
+                                struct flb_output_flush *out_flush,
+                                struct flb_input_instance *i_ins,
+                                void *out_context,
+                                struct flb_config *config)
+{
+    int ret;
+    flb_sds_t json = NULL;
+    size_t json_size;
+    size_t tag_len;
+    struct flb_azure_blob *ctx = out_context;
+    struct azure_blob_file *upload_file = NULL;
+    int upload_timeout_check = FLB_FALSE;
+    int total_file_size_check = FLB_FALSE;
+
+    (void)i_ins;
+    (void)config;
+
+    void *final_payload = NULL;
+    size_t final_payload_size = 0;
+
+    flb_plg_trace(ctx->ins, "flushing bytes for event tag %s and size %zu", event_chunk->tag, event_chunk->size);
+
+    tag_len = flb_sds_len(event_chunk->tag);
+
+    if (ctx->buffering_enabled == FLB_TRUE) {
+        /* Reformat msgpack to JSON payload */
+        ret = azure_blob_format(config, i_ins, ctx, NULL, FLB_EVENT_TYPE_LOGS, event_chunk->tag, tag_len, event_chunk->data, event_chunk->size, (void **)&json, &json_size);
+        if (ret != 0) {
+            flb_plg_error(ctx->ins, "cannot reformat data into json");
+            goto error;
+        }
+
+        /* Get a file candidate matching the given 'tag' */
+        upload_file = azure_blob_store_file_get(ctx, event_chunk->tag, tag_len);
+
+        /* Discard upload_file if it has failed to upload MAX_UPLOAD_ERRORS times */
+        if (upload_file != NULL && upload_file->failures >= MAX_UPLOAD_ERRORS) {
+            flb_plg_warn(ctx->ins, "File with tag %s failed to send %d times, will not retry", event_chunk->tag, MAX_UPLOAD_ERRORS);
+            azure_blob_store_file_inactive(ctx, upload_file);
+            upload_file = NULL;
+        }
+
+        /* If upload_timeout has elapsed, upload file */
+        if (upload_file != NULL && time(NULL) > (upload_file->create_time + ctx->upload_timeout)) {
+            upload_timeout_check = FLB_TRUE;
+            flb_plg_trace(ctx->ins, "upload_timeout reached for %s", event_chunk->tag);
+        }
+
+        /* If total_file_size has been reached, upload file */
+        if (upload_file && upload_file->size + json_size > ctx->file_size) {
+            flb_plg_trace(ctx->ins, "total_file_size exceeded %s", event_chunk->tag);
+            total_file_size_check = FLB_TRUE;
+        }
+
+        /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
+        if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
+            flb_plg_debug(ctx->ins, "uploading file %s with size %zu", upload_file->fsf->name, upload_file->size);
+
+            /* Validate the container exists, otherwise just create it */
+            ret = ensure_container(ctx);
+            if (ret == FLB_FALSE) {
+                FLB_OUTPUT_RETURN(FLB_RETRY);
+            }
+
+            /* Construct the payload for upload */
+            ret = construct_request_buffer(ctx, json, upload_file, &final_payload, &final_payload_size);
+            if (ret != 0) {
+                flb_plg_error(ctx->ins, "error constructing request buffer for %s", event_chunk->tag);
+                flb_sds_destroy(json);
+                FLB_OUTPUT_RETURN(FLB_RETRY);
+            }
+
+            /* Upload the file */
+            ret = send_blob(config, i_ins, ctx, upload_file->fsf->name, event_chunk->tag, flb_sds_len(event_chunk->tag), final_payload, final_payload_size);
+
+            if (ret == CREATE_BLOB) {
+                ret = create_blob(ctx, upload_file->fsf->name);
+                if (ret == FLB_OK) {
+                    ret = send_blob(config, i_ins, ctx, upload_file->fsf->name, event_chunk->tag, flb_sds_len(event_chunk->tag), final_payload, final_payload_size);
+                }
+            }
+
+            if (ret == FLB_OK) {
+                flb_plg_debug(ctx->ins, "uploaded file %s successfully", upload_file->fsf->name);
+                azure_blob_store_file_delete(ctx, upload_file);
+            } else {
+                flb_plg_error(ctx->ins, "error uploading file %s", upload_file->fsf->name);
+                goto error;
+            }
+        } else {
+            /* Buffer current chunk in filesystem and wait for next chunk from engine */
+            ret = azure_blob_store_buffer_put(ctx, upload_file, json, json_size, event_chunk->tag, tag_len);
+            if (ret == 0) {
+                flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
+                goto cleanup;
+            } else {
+                flb_plg_error(ctx->ins, "failed to buffer chunk %s", event_chunk->tag);
+                goto error;
+            }
+        }
+    } else {
+        /* Buffering mode is disabled, proceed with regular flush */
+
+        /* Validate the container exists, otherwise just create it */
+        ret = ensure_container(ctx);
+        if (ret == FLB_FALSE) {
+            FLB_OUTPUT_RETURN(FLB_RETRY);
+        }
+
+        /* Reformat msgpack to JSON payload */
+        ret = azure_blob_format(config, i_ins, ctx, NULL, FLB_EVENT_TYPE_LOGS, event_chunk->tag, tag_len, event_chunk->data, event_chunk->size, (void **)&json, &json_size);
+        if (ret != 0) {
+            flb_plg_error(ctx->ins, "cannot reformat data into json");
+            goto error;
+        }
+
+        ret = send_blob(config, i_ins, ctx, (char *)event_chunk->tag, (char *)event_chunk->tag, flb_sds_len(event_chunk->tag), json, json_size);
+
+        if (ret == CREATE_BLOB) {
+            ret = create_blob(ctx, event_chunk->tag);
+            if (ret == FLB_OK) {
+                ret = send_blob(config, i_ins, ctx, (char *)event_chunk->tag, (char *)event_chunk->tag, flb_sds_len(event_chunk->tag), json, json_size);
+            }
+        }
+    }
+
+    cleanup:
+    /* Cleanup */
+    if (json) {
+        flb_sds_destroy(json);
+    }
+
+    FLB_OUTPUT_RETURN(ret);
+
+    error:
+    if (json) {
+        flb_sds_destroy(json);
+    }
+
+    FLB_OUTPUT_RETURN(FLB_RETRY);
+}
+
+static void cb_azure_blob_flush_ext(struct flb_event_chunk *event_chunk,
                                 struct flb_output_flush *out_flush,
                                 struct flb_input_instance *i_ins,
                                 void *out_context,
