@@ -866,6 +866,11 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
                 ret = send_blob(config, i_ins, ctx, (char *)event_chunk->tag, (char *)event_chunk->tag, flb_sds_len(event_chunk->tag), json, json_size);
             }
         }
+        if (ret == FLB_OK) {
+            goto cleanup;
+        } else {
+            goto error;
+        }
     }
 
     cleanup:
