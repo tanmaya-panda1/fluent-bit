@@ -538,6 +538,7 @@ static int cb_azure_blob_init(struct flb_output_instance *ins,
         flb_plg_info(ctx->ins, "Using upload size %lu bytes", ctx->file_size);
     }
 
+    flb_output_set_context(ins, ctx);
 
     flb_output_set_http_debug_callbacks(ins);
     return 0;
@@ -697,7 +698,7 @@ static int buffer_and_send_blob(struct flb_config *config,
         }
     } else {
         /* Buffer current chunk in filesystem and wait for next chunk from engine */
-        ret = azure_blob_store_buffer_put(ctx, upload_file, json, json_size, event_chunk->tag, tag_len);
+        ret = azure_blob_store_buffer_put(ctx, upload_file, event_chunk->tag, tag_len, json, json_size);
         if (ret == 0) {
             flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
             flb_sds_destroy(json);
