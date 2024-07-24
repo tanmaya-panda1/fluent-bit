@@ -788,12 +788,12 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
             }
 
             /* Upload the file */
-            ret = send_blob(config, i_ins, ctx, upload_file->fsf->name, event_chunk->tag, flb_sds_len(event_chunk->tag), final_payload, final_payload_size);
+            ret = send_blob(config, i_ins, ctx, upload_file->fsf->name, event_chunk->tag, tag_len, final_payload, final_payload_size);
 
             if (ret == CREATE_BLOB) {
                 ret = create_blob(ctx, upload_file->fsf->name);
                 if (ret == FLB_OK) {
-                    ret = send_blob(config, i_ins, ctx, upload_file->fsf->name, event_chunk->tag, flb_sds_len(event_chunk->tag), final_payload, final_payload_size);
+                    ret = send_blob(config, i_ins, ctx, upload_file->fsf->name, event_chunk->tag, tag_len, final_payload, final_payload_size);
                 }
             }
 
@@ -806,7 +806,7 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
             }
         } else {
             /* Buffer current chunk in filesystem and wait for next chunk from engine */
-            ret = azure_blob_store_buffer_put(ctx, upload_file, json, json_size, event_chunk->tag, tag_len);
+            ret = azure_blob_store_buffer_put(ctx, upload_file, event_chunk->tag, tag_len, json, json_size);
             if (ret == 0) {
                 flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
                 goto cleanup;
