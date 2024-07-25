@@ -121,7 +121,7 @@ static int construct_request_buffer(struct flb_azure_blob *ctx, flb_sds_t new_da
         }
         body = buffered_data = tmp;
         memcpy(body + buffer_size, new_data, flb_sds_len(new_data));
-        if (ctx->compression_enabled == FLB_FALSE){
+        if (ctx->compress_gzip == FLB_FALSE){
             body[body_size] = '\0';
         }
     }
@@ -1029,49 +1029,6 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
         flb_free(final_payload); // Ensure final_payload is freed in error path
     }
     FLB_OUTPUT_RETURN(FLB_RETRY);
-}
-
-static void cb_azure_blob_flush_ext(struct flb_event_chunk *event_chunk,
-                                struct flb_output_flush *out_flush,
-                                struct flb_input_instance *i_ins,
-                                void *out_context,
-                                struct flb_config *config)
-{
-    int ret;
-    struct flb_azure_blob *ctx = out_context;
-    (void) i_ins;
-    (void) config;
-
-    /* Validate the container exists, otherwise just create it */
-    ret = ensure_container(ctx);
-    if (ret == FLB_FALSE) {
-        FLB_OUTPUT_RETURN(FLB_RETRY);
-    }
-
-    /* Buffering is enabled, handle buffering logic */
-    if (ctx->buffering_enabled == FLB_TRUE && ctx->btype == AZURE_BLOB_BLOCKBLOB) {
-        ret = buffer_and_send_blob(config, i_ins, ctx, event_chunk);
-    } else {
-        /* Directly send the blob */
-        ret = send_blob(config, i_ins, ctx,
-                        (char *) event_chunk->tag,  /* use tag as 'name' */
-                        (char *) event_chunk->tag, flb_sds_len(event_chunk->tag),
-                        (char *) event_chunk->data, event_chunk->size);
-
-        if (ret == CREATE_BLOB) {
-            ret = create_blob(ctx, event_chunk->tag);
-            if (ret == FLB_OK) {
-                ret = send_blob(config, i_ins, ctx,
-                                (char *) event_chunk->tag,  /* use tag as 'name' */
-                                (char *) event_chunk->tag,
-                                flb_sds_len(event_chunk->tag),
-                                (char *) event_chunk->data, event_chunk->size);
-            }
-        }
-    }
-
-    /* FLB_RETRY, FLB_OK, FLB_ERROR */
-    FLB_OUTPUT_RETURN(ret);
 }
 
 static int cb_azure_blob_exit(void *data, struct flb_config *config)
