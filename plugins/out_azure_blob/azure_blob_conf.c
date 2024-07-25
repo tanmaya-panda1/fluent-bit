@@ -142,6 +142,14 @@ struct flb_azure_blob *flb_azure_blob_conf_create(struct flb_output_instance *in
         }
     }
 
+    /* Check for invalid configuration: buffering enabled with appendblob */
+    if (ctx->buffering_enabled == FLB_TRUE && ctx->btype == AZURE_BLOB_APPENDBLOB) {
+        flb_plg_error(ctx->ins,
+                      "buffering is not supported with 'appendblob' blob_type. "
+                      "Please use 'blockblob' blob_type or disable buffering.");
+        return NULL;
+    }
+
     /* Compress (gzip) */
     tmp = (char *) flb_output_get_property("compress", ins);
     ctx->compress_gzip = FLB_FALSE;
