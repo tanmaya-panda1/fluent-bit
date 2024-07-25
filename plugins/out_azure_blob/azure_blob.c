@@ -952,12 +952,12 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
             }
 
             /* Upload the file */
-            ret = send_blob(config, i_ins, ctx, upload_file->fsf->name, event_chunk->tag, tag_len, final_payload, final_payload_size);
+            ret = send_blob(config, i_ins, ctx, (char *)event_chunk->tag, (char *)event_chunk->tag, tag_len, final_payload, final_payload_size);
 
             if (ret == CREATE_BLOB) {
                 ret = create_blob(ctx, upload_file->fsf->name);
                 if (ret == FLB_OK) {
-                    ret = send_blob(config, i_ins, ctx, upload_file->fsf->name, event_chunk->tag, tag_len, final_payload, final_payload_size);
+                    ret = send_blob(config, i_ins, ctx, (char *)event_chunk->tag, (char *)event_chunk->tag, tag_len, final_payload, final_payload_size);
                 }
             }
 
