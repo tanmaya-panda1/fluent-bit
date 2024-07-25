@@ -64,46 +64,72 @@ static int azure_blob_format(struct flb_config *config,
     return 0;
 }
 
+/*
+ * Either new_data or chunk can be NULL, but not both
+ */
 static int construct_request_buffer(struct flb_azure_blob *ctx, flb_sds_t new_data,
                                     struct azure_blob_file *upload_file,
-                                    void **out_buf, size_t *out_size)
+                                    char **out_buf, size_t *out_size)
 {
-    char *buffer = NULL;
+    char *body;
+    char *tmp;
+    size_t body_size = 0;
+    char *buffered_data = NULL;
     size_t buffer_size = 0;
     int ret;
 
-    if (upload_file != NULL) {
-        /* Read existing data from file */
-        ret = azure_blob_store_file_upload_read(ctx, upload_file->fsf, &buffer, &buffer_size);
-        if (ret != 0) {
-            flb_plg_error(ctx->ins, "could not read buffered file");
-            return -1;
-        }
-
-        /* Allocate enough space for existing data + new data */
-        buffer = flb_realloc(buffer, buffer_size + flb_sds_len(new_data) + 1);
-        if (!buffer) {
-            flb_errno();
-            return -1;
-        }
-
-        /* Append new data */
-        memcpy(buffer + buffer_size, new_data, flb_sds_len(new_data));
-        buffer_size += flb_sds_len(new_data);
-    } else {
-        buffer_size = flb_sds_len(new_data);
-        buffer = flb_malloc(buffer_size + 1);
-        if (!buffer) {
-            flb_errno();
-            return -1;
-        }
-        memcpy(buffer, new_data, buffer_size);
+    if (new_data == NULL && upload_file == NULL) {
+        flb_plg_error(ctx->ins, "[construct_request_buffer] Something went wrong"
+                                " both chunk and new_data are NULL");
+        return -1;
     }
 
-    buffer[buffer_size] = '\0';
+    if (upload_file) {
+        ret = azure_blob_store_file_upload_read(ctx, upload_file->fsf, &buffered_data, &buffer_size);
+        if (ret < 0) {
+            flb_plg_error(ctx->ins, "Could not read locally buffered data %s",
+                          upload_file->fsf->name);
+            return -1;
+        }
 
-    *out_buf = buffer;
-    *out_size = buffer_size;
+        /*
+         * lock the upload_file from buffer list
+         */
+        azure_blob_store_file_lock(upload_file);
+        body = buffered_data;
+        body_size = buffer_size;
+    }
+
+    flb_plg_debug(ctx->ins, "[construct_request_buffer] size of buffer file read %zu", buffer_size);
+
+    /*
+     * If new data is arriving, increase the original 'buffered_data' size
+     * to append the new one.
+     */
+    if (new_data) {
+        body_size += flb_sds_len(new_data);
+        flb_plg_debug(ctx->ins, "[construct_request_buffer] size of new_data %zu", body_size);
+
+        tmp = flb_realloc(buffered_data, body_size + 1);
+        if (!tmp) {
+            flb_errno();
+            flb_free(buffered_data);
+            if (upload_file) {
+                azure_blob_store_file_unlock(upload_file);
+            }
+            return -1;
+        }
+        body = buffered_data = tmp;
+        memcpy(body + buffer_size, new_data, flb_sds_len(new_data));
+        if (ctx->compression_enabled == FLB_FALSE){
+            body[body_size] = '\0';
+        }
+    }
+
+    flb_plg_debug(ctx->ins, "[construct_request_buffer] final increased %zu", body_size);
+
+    *out_buf = body;
+    *out_size = body_size;
 
     return 0;
 }
@@ -648,105 +674,12 @@ static int send_blob_impl(struct flb_config *config,
     return FLB_RETRY;
 }
 
-
-static int buffer_and_send_blob(struct flb_config *config,
-                                struct flb_input_instance *i_ins,
-                                struct flb_azure_blob *ctx,
-                                struct flb_event_chunk *event_chunk)
-{
-    int ret;
-    flb_sds_t json = NULL;
-    size_t json_size;
-    size_t tag_len;
-    struct azure_blob_file *upload_file = NULL;
-    int upload_timeout_check = FLB_FALSE;
-    int total_file_size_check = FLB_FALSE;
-
-    (void)i_ins;
-    (void)config;
-
-    void *final_payload = NULL;
-    size_t final_payload_size = 0;
-
-    tag_len = flb_sds_len(event_chunk->tag);
-
-    /* Reformat msgpack to JSON payload */
-    ret = azure_blob_format(config, i_ins, ctx, NULL, FLB_EVENT_TYPE_LOGS, event_chunk->tag, tag_len, event_chunk->data, event_chunk->size, (void **)&json, &json_size);
-    if (ret != 0) {
-        flb_plg_error(ctx->ins, "cannot reformat data into json");
-        return FLB_RETRY;
-    }
-
-    /* Get a file candidate matching the given 'tag' */
-    upload_file = azure_blob_store_file_get(ctx, event_chunk->tag, tag_len);
-
-    /* Discard upload_file if it has failed to upload MAX_UPLOAD_ERRORS times */
-    if (upload_file != NULL && upload_file->failures >= MAX_UPLOAD_ERRORS) {
-        flb_plg_warn(ctx->ins, "File with tag %s failed to send %d times, will not retry", event_chunk->tag, MAX_UPLOAD_ERRORS);
-        azure_blob_store_file_inactive(ctx, upload_file);
-        upload_file = NULL;
-    }
-
-    /* If upload_timeout has elapsed, upload file */
-    if (upload_file != NULL && time(NULL) > (upload_file->create_time + ctx->upload_timeout)) {
-        upload_timeout_check = FLB_TRUE;
-        flb_plg_trace(ctx->ins, "upload_timeout reached for %s", event_chunk->tag);
-    }
-
-    /* If total_file_size has been reached, upload file */
-    if (upload_file && upload_file->size + json_size > ctx->file_size) {
-        flb_plg_trace(ctx->ins, "total_file_size exceeded %s", event_chunk->tag);
-        total_file_size_check = FLB_TRUE;
-    }
-
-    /* File is ready for upload, upload_file != NULL prevents from segfaulting. */
-    if ((upload_file != NULL) && (upload_timeout_check == FLB_TRUE || total_file_size_check == FLB_TRUE)) {
-        flb_plg_debug(ctx->ins, "uploading file %s with size %zu", upload_file->fsf->name, upload_file->size);
-
-        /* Construct the payload for upload */
-        ret = construct_request_buffer(ctx, json, upload_file, &final_payload, &final_payload_size);
-        if (ret != 0) {
-            flb_plg_error(ctx->ins, "error constructing request buffer for %s", event_chunk->tag);
-            flb_sds_destroy(json);
-            return FLB_RETRY;
-        }
-
-        /* Upload the file */
-        ret = send_blob(config, i_ins, ctx, upload_file->fsf->name, event_chunk->tag, tag_len, final_payload, final_payload_size);
-        flb_free(final_payload);
-
-        if (ret == FLB_OK) {
-            flb_plg_debug(ctx->ins, "uploaded file %s successfully", upload_file->fsf->name);
-            azure_blob_store_file_delete(ctx, upload_file);
-        } else {
-            flb_plg_error(ctx->ins, "error uploading file %s", upload_file->fsf->name);
-            flb_sds_destroy(json);
-            return FLB_RETRY;
-        }
-    } else {
-        /* Buffer current chunk in filesystem and wait for next chunk from engine */
-        ret = azure_blob_store_buffer_put(ctx, upload_file, event_chunk->tag, tag_len, json, json_size);
-        if (ret == 0) {
-            flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
-            flb_sds_destroy(json);
-            return FLB_OK;
-        } else {
-            flb_plg_error(ctx->ins, "failed to buffer chunk %s", event_chunk->tag);
-            flb_sds_destroy(json);
-            return FLB_RETRY;
-        }
-    }
-
-    flb_sds_destroy(json);
-    return ret;
-}
-
 static void cb_azure_blob_ingest(struct flb_config *config, void *data)
 {
     struct flb_azure_blob *ctx = data;
     struct azure_blob_file *file = NULL;
     struct flb_fstore_file *fsf;
-    void *buffer = NULL;
+    char *buffer = NULL;
     size_t buffer_size = 0;
     struct mk_list *tmp;
     struct mk_list *head;
@@ -827,7 +760,7 @@ static int ingest_all_chunks(struct flb_azure_blob *ctx, struct flb_config *conf
     struct flb_fstore_file *fsf;
     struct flb_fstore_stream *fs_stream;
     flb_sds_t payload = NULL;
-    void *buffer = NULL;
+    char *buffer = NULL;
     size_t buffer_size;
     int ret;
     flb_sds_t tag_sds;
@@ -961,7 +894,7 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
     (void)i_ins;
     (void)config;
 
-    void *final_payload = NULL;
+    char *final_payload = NULL;
     size_t final_payload_size = 0;
 
     flb_plg_trace(ctx->ins, "flushing bytes for event tag %s and size %zu", event_chunk->tag, event_chunk->size);
