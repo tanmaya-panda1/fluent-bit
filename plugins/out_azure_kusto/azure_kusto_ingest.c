@@ -276,12 +276,13 @@ static flb_sds_t create_ingestion_message(struct flb_azure_kusto *ctx, flb_sds_t
                                  "\"%s\", \"TableName\": \"%s\","
                                  "\"AdditionalProperties\": { \"format\": \"multijson\", "
                                  "\"authorizationContext\": "
-                                 "\"%s\", \"jsonMappingReference\": \"%s\" }}%c",
+                                 "\"%s\", \"jsonMappingReference\": \"%s\" }, \"ApplicationForTracing\": \"FluentBit\", 
+                                 \"ClientVersionForTracing\":\"%s\"}%c",
                                  uuid, blob_uri, payload_size, ctx->database_name,
                                  ctx->table_name, ctx->resources->identity_token,
                                  ctx->ingestion_mapping_reference == NULL
                                      ? ""
-                                     : ctx->ingestion_mapping_reference, 0);
+                                     : ctx->ingestion_mapping_reference, FLB_VERSION_STR, 0);
 
             if (message_len != -1) {
                 flb_plg_debug(ctx->ins, "created ingestion message:\n%s", message);
