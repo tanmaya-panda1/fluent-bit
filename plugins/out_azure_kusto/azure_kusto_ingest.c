@@ -23,6 +23,7 @@
 #include <fluent-bit/flb_random.h>
 #include <fluent-bit/flb_time.h>
 #include <fluent-bit/flb_utils.h>
+#include <fluent-bit/flb_version.h>
 
 #include <math.h>
 #include <msgpack.h>
@@ -302,15 +303,16 @@ static flb_sds_t create_ingestion_message(struct flb_azure_kusto *ctx, flb_sds_t
                     flb_sds_snprintf(&message, 0,
                                      "{\"Id\": \"%s\", \"BlobPath\": \"%s\", "
                                      "\"RawDataSize\": %lu, \"DatabaseName\": "
-                                     "\"%s\", \"TableName\": \"%s\","
+                                     "\"%s\", \"TableName\": \"%s\", "
+                                     "\"ClientVersionForTracing\": \"Kusto.Fluent-Bit:%s\", "
+                                     "\"ApplicationForTracing\": \"%s\", "
                                      "\"AdditionalProperties\": { \"format\": \"multijson\", "
-                                     "\"authorizationContext\": "
-                                     "\"%s\", \"jsonMappingReference\": \"%s\" }}%c",
+                                     "\"authorizationContext\": \"%s\", "
+                                     "\"jsonMappingReference\": \"%s\" }}%c",
                                      uuid, blob_uri, payload_size, ctx->database_name,
-                                     ctx->table_name, ctx->resources->identity_token,
-                                     ctx->ingestion_mapping_reference == NULL
-                                     ? ""
-                                     : ctx->ingestion_mapping_reference, 0);
+                                     ctx->table_name, FLB_VERSION_STR, "Kusto.Fluent-Bit",
+                                     ctx->resources->identity_token,
+                                     ctx->ingestion_mapping_reference == NULL ? "" : ctx->ingestion_mapping_reference, 0);
 
             if (message_len != -1) {
                 flb_plg_debug(ctx->ins, "created ingestion message:\n%s", message);
