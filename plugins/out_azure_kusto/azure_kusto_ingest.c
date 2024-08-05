@@ -269,7 +269,7 @@ static flb_sds_t create_ingestion_message(struct flb_azure_kusto *ctx, flb_sds_t
 	    flb_plg_debug(ctx->ins,"table name :: %s",ctx->table_name);
 
         if (message) {
-            message_len =
+            /*message_len =
                 flb_sds_snprintf(&message, 0,
                                  "{\"Id\": \"%s\", \"BlobPath\": \"%s\", "
                                  "\"RawDataSize\": %lu, \"DatabaseName\": "
@@ -281,7 +281,22 @@ static flb_sds_t create_ingestion_message(struct flb_azure_kusto *ctx, flb_sds_t
                                  ctx->table_name, ctx->resources->identity_token,
                                  ctx->ingestion_mapping_reference == NULL
                                      ? ""
-                                     : ctx->ingestion_mapping_reference, 0);
+                                     : ctx->ingestion_mapping_reference, 0);*/
+
+            message_len =
+                    flb_sds_snprintf(&message, 0,
+                                     "{\"Id\": \"%s\", \"BlobPath\": \"%s\", "
+                                     "\"RawDataSize\": %lu, \"DatabaseName\": "
+                                     "\"%s\", \"TableName\": \"%s\","
+                                     "\"AdditionalProperties\": { \"format\": \"multijson\", "
+                                     "\"authorizationContext\": \"%s\", "
+                                     "\"jsonMappingReference\": \"%s\", "
+                                     "\"ClientVersionForTracing\": \"%s\", "
+                                     "\"ApplicationForTracing\": \"%s\" }}%c",
+                                     uuid, blob_uri, payload_size, ctx->database_name,
+                                     ctx->table_name, ctx->resources->identity_token,
+                                     ctx->ingestion_mapping_reference == NULL ? "" : ctx->ingestion_mapping_reference,
+                                     "2.0.0", "Kusto.FluentBit", 0);
 
             if (message_len != -1) {
                 flb_plg_debug(ctx->ins, "created ingestion message:\n%s", message);
@@ -385,10 +400,16 @@ static int azure_kusto_enqueue_ingestion(struct flb_azure_kusto *ctx, flb_sds_t 
     struct tm tm;
     char tmp[64];
     int len;
+    char *uuid;
+    char client_request_id[256];
 
     now = time(NULL);
     gmtime_r(&now, &tm);
     len = strftime(tmp, sizeof(tmp) - 1, "%a, %d %b %Y %H:%M:%S GMT", &tm);
+
+    // Format client request ID
+    uuid = generate_uuid();
+    snprintf(client_request_id, sizeof(client_request_id), "KRC.execute;%s", uuid);
 
     u_node = flb_upstream_ha_node_get(ctx->resources->queue_ha);
     if (!u_node) {
@@ -428,11 +449,13 @@ static int azure_kusto_enqueue_ingestion(struct flb_azure_kusto *ctx, flb_sds_t 
                     flb_http_add_header(c, "x-ms-client-version", 19, FLB_VERSION_STR, strlen(FLB_VERSION_STR));
                     flb_http_add_header(c, "x-ms-app", 8, "Kusto.Fluent-Bit", 16);
                     flb_http_add_header(c, "x-ms-user", 9, "Kusto.Fluent-Bit", 16);
+                    flb_http_add_header(c, "x-ms-client-request-id", 21, client_request_id, strlen(client_request_id));
 
                     ret = flb_http_do(c, &resp_size);
                     flb_plg_debug(ctx->ins,
                                   "kusto queue request http_do=%i, HTTP Status: %i", ret,
                                   c->resp.status);
+                    flb_free(uuid);
 
                     if (ret == 0) {
                         /* Validate return status and HTTP status if set */
