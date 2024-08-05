@@ -41,39 +41,117 @@ static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
 {
     int ret;
     char *token;
+    char *access_token = NULL;
 
-    /* Clear any previous oauth2 payload content */
-    flb_oauth2_payload_clear(ctx->o);
+    if (!ctx->client_secret && ctx->client_id && ctx->tenant_id) {
+        // Retrieve token from IMDS endpoint
+        struct flb_http_client *c;
+        struct flb_connection *u_conn;
+        flb_sds_t imds_url;
+        flb_sds_t response;
 
-    ret = flb_oauth2_payload_append(ctx->o, "grant_type", 10, "client_credentials", 18);
-    if (ret == -1) {
-        flb_plg_error(ctx->ins, "error appending oauth2 params");
-        return -1;
-    }
+        imds_url = flb_sds_create("http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/");
+        if (!imds_url) {
+            flb_plg_error(ctx->ins, "error creating IMDS URL");
+            return -1;
+        }
 
-    ret = flb_oauth2_payload_append(ctx->o, "scope", 5, FLB_AZURE_KUSTO_SCOPE, 39);
-    if (ret == -1) {
-        flb_plg_error(ctx->ins, "error appending oauth2 params");
-        return -1;
-    }
+        u_conn = flb_upstream_conn_get(ctx->u);
+        if (!u_conn) {
+            flb_plg_error(ctx->ins, "cannot create upstream connection for IMDS endpoint");
+            flb_sds_destroy(imds_url);
+            return -1;
+        }
 
-    ret = flb_oauth2_payload_append(ctx->o, "client_id", 9, ctx->client_id, -1);
-    if (ret == -1) {
-        flb_plg_error(ctx->ins, "error appending oauth2 params");
-        return -1;
-    }
+        c = flb_http_client(u_conn, FLB_HTTP_GET, imds_url, NULL, 0, NULL, 0, NULL, 0);
+        flb_http_add_header(c, "Metadata", 8, "true", 4);
 
-    ret = flb_oauth2_payload_append(ctx->o, "client_secret", 13, ctx->client_secret, -1);
-    if (ret == -1) {
-        flb_plg_error(ctx->ins, "error appending oauth2 params");
-        return -1;
-    }
+        ret = flb_http_do(c, NULL);
+        if (ret != 0 || c->resp.status != 200) {
+            flb_plg_error(ctx->ins, "error retrieving token from IMDS endpoint");
+            flb_http_client_destroy(c);
+            flb_upstream_conn_release(u_conn);
+            flb_sds_destroy(imds_url);
+            return -1;
+        }
 
-    /* Retrieve access token */
-    token = flb_oauth2_token_get(ctx->o);
-    if (!token) {
-        flb_plg_error(ctx->ins, "error retrieving oauth2 access token");
-        return -1;
+        response = flb_sds_create_len(c->resp.payload, c->resp.payload_size);
+        if (!response) {
+            flb_plg_error(ctx->ins, "error creating response buffer");
+            flb_http_client_destroy(c);
+            flb_upstream_conn_release(u_conn);
+            flb_sds_destroy(imds_url);
+            return -1;
+        }
+
+        // Parse the JSON response to extract the access token
+        size_t access_token_len = 0;
+        char *p = strstr(response, "\"access_token\":\"");
+        if (p) {
+            p += strlen("\"access_token\":\"");
+            char *end = strstr(p, "\"");
+            if (end) {
+                access_token_len = end - p;
+                access_token = flb_malloc(access_token_len + 1);
+                if (access_token) {
+                    strncpy(access_token, p, access_token_len);
+                    access_token[access_token_len] = '\0';
+                }
+            }
+        }
+
+
+        if (!access_token) {
+            flb_plg_error(ctx->ins, "error extracting access token from IMDS response");
+            flb_sds_destroy(response);
+            flb_http_client_destroy(c);
+            flb_upstream_conn_release(u_conn);
+            flb_sds_destroy(imds_url);
+            return -1;
+        }
+
+        // Update the OAuth2 context with the retrieved token
+        ctx->o->access_token = flb_sds_create(access_token);
+        ctx->o->token_type = flb_sds_create("Bearer");
+        flb_free(access_token);
+
+        flb_sds_destroy(response);
+        flb_http_client_destroy(c);
+        flb_upstream_conn_release(u_conn);
+        flb_sds_destroy(imds_url);
+    } else {
+        // Use client secret flow
+        flb_oauth2_payload_clear(ctx->o);
+
+        ret = flb_oauth2_payload_append(ctx->o, "grant_type", 10, "client_credentials", 18);
+        if (ret == -1) {
+            flb_plg_error(ctx->ins, "error appending oauth2 params");
+            return -1;
+        }
+
+        ret = flb_oauth2_payload_append(ctx->o, "scope", 5, FLB_AZURE_KUSTO_SCOPE, 39);
+        if (ret == -1) {
+            flb_plg_error(ctx->ins, "error appending oauth2 params");
+            return -1;
+        }
+
+        ret = flb_oauth2_payload_append(ctx->o, "client_id", 9, ctx->client_id, -1);
+        if (ret == -1) {
+            flb_plg_error(ctx->ins, "error appending oauth2 params");
+            return -1;
+        }
+
+        ret = flb_oauth2_payload_append(ctx->o, "client_secret", 13, ctx->client_secret, -1);
+        if (ret == -1) {
+            flb_plg_error(ctx->ins, "error appending oauth2 params");
+            return -1;
+        }
+
+        token = flb_oauth2_token_get(ctx->o);
+        if (!token) {
+            flb_plg_error(ctx->ins, "error retrieving oauth2 access token");
+            return -1;
+        }
     }
 
     return 0;
