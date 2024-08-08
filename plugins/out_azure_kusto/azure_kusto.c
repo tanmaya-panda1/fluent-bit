@@ -29,7 +29,7 @@
 #include <fluent-bit/flb_sds.h>
 #include <fluent-bit/flb_fstore.h>
 #include <msgpack.h>
-#include <cJSON.h>
+#include <fluent-bit/flb_version.h>
 
 #include "azure_kusto.h"
 #include "azure_kusto_conf.h"
@@ -173,7 +173,7 @@ flb_sds_t execute_ingest_csl_command(struct flb_azure_kusto *ctx, const char *cs
                     flb_http_add_header(c, "Accept", 6, "application/json", 16);
                     flb_http_add_header(c, "Authorization", 13, token,
                                         flb_sds_len(token));
-                    flb_http_add_header(c, "x-ms-client-version", 19, "Kusto.Fluent-Bit:1.0.0", 22);
+                    flb_http_add_header(c, "x-ms-client-version", 19, FLB_VERSION_STR, strlen(FLB_VERSION_STR));
                     flb_http_add_header(c, "x-ms-app", 8, "Kusto.Fluent-Bit", 16);
                     flb_http_add_header(c, "x-ms-user", 9, "Kusto.Fluent-Bit", 16);
                     flb_http_buffer_size(c, FLB_HTTP_DATA_SIZE_MAX * 10);
