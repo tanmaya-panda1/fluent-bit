@@ -117,7 +117,7 @@ flb_sds_t azb_block_blob_uri_ext(struct flb_azure_blob *ctx, char *tag,
 }
 
 flb_sds_t azb_block_blob_uri_commit(struct flb_azure_blob *ctx,
-                                    char *tag, uint64_t ms)
+                                    char *tag, uint64_t ms, char *str)
 {
     char *ext;
     flb_sds_t uri;
@@ -135,11 +135,11 @@ flb_sds_t azb_block_blob_uri_commit(struct flb_azure_blob *ctx,
     }
 
     if (ctx->path) {
-        flb_sds_printf(&uri, "/%s/%s.%" PRIu64 "%s?comp=blocklist", ctx->path, tag,
+        flb_sds_printf(&uri, "/%s/%s.%s.%" PRIu64 "%s?comp=blocklist", ctx->path, tag, str,
                        ms, ext);
     }
     else {
-        flb_sds_printf(&uri, "/%s.%" PRIu64 "%s?comp=blocklist", tag, ms, ext);
+        flb_sds_printf(&uri, "/%s.%s.%" PRIu64 "%s?comp=blocklist", tag, str , ms, ext);
     }
 
     if (ctx->atype == AZURE_BLOB_AUTH_SAS && ctx->sas_token) {
@@ -192,7 +192,7 @@ char *azb_block_blob_id(uint64_t *ms)
 }
 
 int azb_block_blob_commit(struct flb_azure_blob *ctx, char *blockid, char *tag,
-                          uint64_t ms)
+                          uint64_t ms, char *str)
 {
     int ret;
     size_t b_sent;
@@ -215,7 +215,7 @@ int azb_block_blob_commit(struct flb_azure_blob *ctx, char *blockid, char *tag,
     }
 
     /* Compose commit URI */
-    uri = azb_block_blob_uri_commit(ctx, tag, ms);
+    uri = azb_block_blob_uri_commit(ctx, tag, ms, str);
     if (!uri) {
         flb_upstream_conn_release(u_conn);
         return FLB_ERROR;
