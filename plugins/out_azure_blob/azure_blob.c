@@ -166,6 +166,8 @@ static int send_blob(struct flb_config *config,
         uri = azb_block_blob_uri(ctx, tag, blockid, ms);
     }
 
+    flb_plg_debug(ctx->ins, "generated blob uri ::: %s", uri);
+
     if (!uri) {
         flb_free(blockid);
         return FLB_RETRY;
