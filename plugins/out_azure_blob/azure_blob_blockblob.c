@@ -28,32 +28,13 @@
 #include "azure_blob_uri.h"
 #include "azure_blob_http.h"
 
-
-void generate_random_string(char *str, size_t length)
-{
-    const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    const size_t charset_size = sizeof(charset) - 1;
-
-    // Seed the random number generator with multiple sources of entropy
-    unsigned int seed = (unsigned int)(time(NULL) ^ clock() ^ getpid());
-    srand(seed);
-
-    for (size_t i = 0; i < length; ++i) {
-        size_t index = (size_t)rand() % charset_size;
-        str[i] = charset[index];
-    }
-
-    str[length] = '\0';
-}
-
 flb_sds_t azb_block_blob_uri(struct flb_azure_blob *ctx, char *tag,
-                             char *blockid, uint64_t ms)
+                             char *blockid, uint64_t ms, char *random_str)
 {
     int len;
     flb_sds_t uri;
     char *ext;
     char *encoded_blockid;
-    char random_str[65]; // 64 characters + null terminator
 
     len = strlen(blockid);
     encoded_blockid = azb_uri_encode(blockid, len);
@@ -73,9 +54,6 @@ flb_sds_t azb_block_blob_uri(struct flb_azure_blob *ctx, char *tag,
     else {
         ext = "";
     }
-
-    // Generate a 64-bit random string
-    generate_random_string(random_str, 64);
 
     if (ctx->path) {
         flb_sds_printf(&uri, "/%s/%s.%s.%" PRIu64 "%s?blockid=%s&comp=block",

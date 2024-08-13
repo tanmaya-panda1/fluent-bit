@@ -24,9 +24,9 @@
 #include "azure_blob.h"
 
 flb_sds_t azb_block_blob_uri(struct flb_azure_blob *ctx, char *tag, char *blockid,
-                             uint64_t ms);
+                             uint64_t ms, char *generated_random_string);
 char *azb_block_blob_id(uint64_t *ms);
 int azb_block_blob_commit(struct flb_azure_blob *ctx, char *blockid, char *tag,
-                          uint64_t ms);
+                          uint64_t ms, char *generated_random_string);
 
 #endif

@@ -134,6 +134,23 @@ static int construct_request_buffer(struct flb_azure_blob *ctx, flb_sds_t new_da
     return 0;
 }
 
+void generate_random_string(char *str, size_t length)
+{
+    const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    const size_t charset_size = sizeof(charset) - 1;
+
+    // Seed the random number generator with multiple sources of entropy
+    unsigned int seed = (unsigned int)(time(NULL) ^ clock() ^ getpid());
+    srand(seed);
+
+    for (size_t i = 0; i < length; ++i) {
+        size_t index = (size_t)rand() % charset_size;
+        str[i] = charset[index];
+    }
+
+    str[length] = '\0';
+}
+
 static int send_blob(struct flb_config *config,
                      struct flb_input_instance *i_ins,
                      struct flb_azure_blob *ctx, char *name,
@@ -153,6 +170,7 @@ static int send_blob(struct flb_config *config,
     size_t payload_size;
     struct flb_http_client *c;
     struct flb_connection *u_conn;
+    char generated_random_string[65];
 
     if (ctx->btype == AZURE_BLOB_APPENDBLOB) {
         uri = azb_append_blob_uri(ctx, tag);
@@ -163,7 +181,8 @@ static int send_blob(struct flb_config *config,
             flb_plg_error(ctx->ins, "could not generate block id");
             return FLB_RETRY;
         }
-        uri = azb_block_blob_uri(ctx, tag, blockid, ms);
+        generate_random_string(generated_random_string, 64); // Generate the random string
+        uri = azb_block_blob_uri(ctx, tag, blockid, ms, generated_random_string);
     }
 
     flb_plg_debug(ctx->ins, "generated blob uri ::: %s", uri);
@@ -271,7 +290,7 @@ static int send_blob(struct flb_config *config,
         flb_http_client_destroy(c);
 
         if (ctx->btype == AZURE_BLOB_BLOCKBLOB) {
-            ret = azb_block_blob_commit(ctx, blockid, tag, ms);
+            ret = azb_block_blob_commit(ctx, blockid, tag, ms, generated_random_string);
             flb_free(blockid);
             return ret;
         }
