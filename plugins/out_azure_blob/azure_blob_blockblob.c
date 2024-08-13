@@ -28,7 +28,73 @@
 #include "azure_blob_uri.h"
 #include "azure_blob_http.h"
 
+
+void generate_random_string(char *str, size_t length)
+{
+    const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    const size_t charset_size = sizeof(charset) - 1;
+
+    // Seed the random number generator with multiple sources of entropy
+    unsigned int seed = (unsigned int)(time(NULL) ^ clock() ^ getpid());
+    srand(seed);
+
+    for (size_t i = 0; i < length; ++i) {
+        size_t index = (size_t)rand() % charset_size;
+        str[i] = charset[index];
+    }
+
+    str[length] = '\0';
+}
+
 flb_sds_t azb_block_blob_uri(struct flb_azure_blob *ctx, char *tag,
+                             char *blockid, uint64_t ms)
+{
+    int len;
+    flb_sds_t uri;
+    char *ext;
+    char *encoded_blockid;
+    char random_str[65]; // 64 characters + null terminator
+
+    len = strlen(blockid);
+    encoded_blockid = azb_uri_encode(blockid, len);
+    if (!encoded_blockid) {
+        return NULL;
+    }
+
+    uri = azb_uri_container(ctx);
+    if (!uri) {
+        flb_sds_destroy(encoded_blockid);
+        return NULL;
+    }
+
+    if (ctx->compress_blob == FLB_TRUE) {
+        ext = ".gz";
+    }
+    else {
+        ext = "";
+    }
+
+    // Generate a 64-bit random string
+    generate_random_string(random_str, 64);
+
+    if (ctx->path) {
+        flb_sds_printf(&uri, "/%s/%s.%s.%" PRIu64 "%s?blockid=%s&comp=block",
+                ctx->path, tag, random_str, ms, ext, encoded_blockid);
+    }
+    else {
+        flb_sds_printf(&uri, "/%s.%s.%" PRIu64 "%s?blockid=%s&comp=block",
+                tag, random_str, ms, ext, encoded_blockid);
+    }
+
+    if (ctx->atype == AZURE_BLOB_AUTH_SAS && ctx->sas_token) {
+        flb_sds_printf(&uri, "&%s", ctx->sas_token);
+    }
+
+    flb_sds_destroy(encoded_blockid);
+    return uri;
+}
+
+flb_sds_t azb_block_blob_uri_ext(struct flb_azure_blob *ctx, char *tag,
                              char *blockid, uint64_t ms)
 {
     int len;
@@ -105,76 +171,8 @@ flb_sds_t azb_block_blob_uri_commit(struct flb_azure_blob *ctx,
     return uri;
 }
 
-void generate_random_string(char *str, size_t length)
-{
-    const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    const size_t charset_size = sizeof(charset) - 1;
-
-    // Seed the random number generator with multiple sources of entropy
-    unsigned int seed = (unsigned int)(time(NULL) ^ clock() ^ getpid());
-    srand(seed);
-
-    for (size_t i = 0; i < length; ++i) {
-        size_t index = (size_t)rand() % charset_size;
-        str[i] = charset[index];
-    }
-
-    str[length] = '\0';
-}
-
 /* Generate a block id */
 char *azb_block_blob_id(uint64_t *ms)
-{
-    int len;
-    int ret;
-    double now;
-    char tmp[32];
-    size_t size;
-    size_t o_len;
-    char *b64;
-    struct flb_time tm;
-    char random_str[33]; // 32 characters + null terminator
-
-    /* Get current time */
-    flb_time_get(&tm);
-
-    /*
-     * Set outgoing time in milliseconds: this is used as a suffix for the
-     * block name
-     */
-    *ms = ((tm.tm.tv_sec * 1000) + (tm.tm.tv_nsec / 1000000));
-
-    /* Convert time to double to format the block id */
-    now = flb_time_to_double(&tm);
-    len = snprintf(tmp, sizeof(tmp), "flb-%.4f.id", now);
-
-    /* Generate a random string */
-    generate_random_string(random_str, sizeof(random_str)-1);
-
-    /* Allocate space for the outgoing base64 buffer */
-    size = (4 * ceil(((double) len / 3) + 1)) + strlen(random_str) + 2; // +2 for separators
-    b64 = flb_malloc(size);
-    if (!b64) {
-        return NULL;
-    }
-
-    /* base64 encode block id */
-    ret = flb_base64_encode((unsigned char *) b64, size, &o_len,
-                            (unsigned char *) tmp, len);
-    if (ret != 0) {
-        flb_free(b64);
-        return NULL;
-    }
-
-    /* Append the random string to the base64 encoded block id */
-    strncat(b64, "__", 2);
-    strncat(b64, random_str, strlen(random_str));
-
-    return b64;
-}
-
-/* Generate a block id */
-char *azb_block_blob_id_ext(uint64_t *ms)
 {
     int len;
     int ret;
