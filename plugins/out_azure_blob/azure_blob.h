@@ -78,6 +78,7 @@ struct flb_azure_blob {
     size_t store_dir_limit_size;
     int buffer_file_delete_early;
     int rewrite_tag;
+    int blob_uri_length;
 
     int has_old_buffers;
     /* track the total amount of buffered data */
