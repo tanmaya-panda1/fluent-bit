@@ -516,13 +516,21 @@ static int azure_kusto_enqueue_ingestion(struct flb_azure_kusto *ctx, flb_sds_t 
 }
 
 /* Function to generate a random alphanumeric string */
-static void generate_random_string(char *str, size_t length) {
-    static const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    for (size_t i = 0; i < length - 1; i++) {
-        int key = rand() % (int)(sizeof(charset) - 1);
-        str[i] = charset[key];
+void generate_random_string(char *str, size_t length)
+{
+    const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    const size_t charset_size = sizeof(charset) - 1;
+
+    // Seed the random number generator with multiple sources of entropy
+    unsigned int seed = (unsigned int)(time(NULL) ^ clock() ^ getpid());
+    srand(seed);
+
+    for (size_t i = 0; i < length; ++i) {
+        size_t index = (size_t)rand() % charset_size;
+        str[i] = charset[index];
     }
-    str[length - 1] = '\0';
+
+    str[length] = '\0';
 }
 
 static flb_sds_t azure_kusto_create_blob_id(struct flb_azure_kusto *ctx, flb_sds_t tag,
@@ -534,8 +542,8 @@ static flb_sds_t azure_kusto_create_blob_id(struct flb_azure_kusto *ctx, flb_sds
     char *b64tag = NULL;
     size_t b64_len = 0;
     char *uuid = NULL;
-    char random_str[17]; // 16 characters + null terminator
     char timestamp[20]; // Buffer for timestamp
+    char generated_random_string[ctx->blob_uri_length + 1];
 
     flb_time_get(&tm);
     ms = ((tm.tm.tv_sec * 1000) + (tm.tm.tv_nsec / 1000000));
@@ -553,9 +561,9 @@ static flb_sds_t azure_kusto_create_blob_id(struct flb_azure_kusto *ctx, flb_sds
             return NULL;
         }
     } else {
-        generate_random_string(random_str, sizeof(random_str));
-        b64tag = random_str;
-        b64_len = strlen(random_str);
+        generate_random_string(generated_random_string, ctx->blob_uri_length); // Generate the random string
+        b64tag = generated_random_string;
+        b64_len = strlen(generated_random_string);
     }
 
     // Get the current timestamp

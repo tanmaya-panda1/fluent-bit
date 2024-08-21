@@ -1290,6 +1290,10 @@ static struct flb_config_map config_map[] = {
                 offsetof(struct flb_azure_kusto, rewrite_tag),
         "Whether to delete the buffered file early after successful blob creation. Default is false"
         },
+        {FLB_CONFIG_MAP_INT, "blob_uri_length", "64",0, FLB_TRUE,
+                    offsetof(struct flb_azure_kusto, blob_uri_length),
+            "Set the length of generated blob uri before ingesting to kusto. Default is 64"
+        },
         /* EOF */
         {0}};
 
