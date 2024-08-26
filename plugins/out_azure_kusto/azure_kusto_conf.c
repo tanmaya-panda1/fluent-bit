@@ -664,11 +664,11 @@ struct flb_azure_kusto *flb_azure_kusto_conf_create(struct flb_output_instance *
     }
 
     /* config: 'client_secret' */
-    if (ctx->client_secret == NULL) {
+    /*if (ctx->client_secret == NULL) {
         flb_plg_error(ctx->ins, "property 'client_secret' is not defined");
         flb_azure_kusto_conf_destroy(ctx);
         return NULL;
-    }
+    }*/
 
     /* config: 'ingestion_endpoint' */
     if (ctx->ingestion_endpoint == NULL) {
