@@ -970,6 +970,8 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
     struct azure_kusto_file *upload_file = NULL;
     int upload_timeout_check = FLB_FALSE;
     int total_file_size_check = FLB_FALSE;
+    flb_sds_t tag_name = NULL;
+    size_t tag_name_len;
 
     (void)i_ins;
     (void)config;
@@ -983,10 +985,17 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
     if (ctx->buffering_enabled == FLB_TRUE) {
 
+        if (ctx->unify_tag == FLB_TRUE){
+            tag_name = flb_sds_create("fluentbit-buffer-file-unify-tag.log");
+        }else {
+            tag_name = event_chunk->tag;
+        }
+        tag_name_len = flb_sds_len(tag_name);
+
         flush_init(ctx,config);
 
         /* Reformat msgpack to JSON payload */
-        ret = azure_kusto_format(ctx, event_chunk->tag, tag_len, event_chunk->data,
+        ret = azure_kusto_format(ctx, tag_name, tag_name_len, event_chunk->data,
                                  event_chunk->size, (void **)&json, &json_size);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "cannot reformat data into json");
@@ -995,8 +1004,8 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
         /* Get a file candidate matching the given 'tag' */
         upload_file = azure_kusto_store_file_get(ctx,
-                                                 event_chunk->tag,
-                                                 tag_len);
+                                                 tag_name,
+                                                 tag_name_len);
 
         /* Discard upload_file if it has failed to upload MAX_UPLOAD_ERRORS times */
         if (upload_file != NULL && upload_file->failures >= MAX_UPLOAD_ERRORS) {
@@ -1033,8 +1042,8 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
 
             /* ingest to kusto */
             ret = ingest_to_kusto_ext(ctx, json, upload_file,
-                                      event_chunk->tag,
-                                      tag_len);
+                                      tag_name,
+                                      tag_name_len);
 
             if (ret == 0){
                 if (ctx->buffering_enabled == FLB_TRUE && ctx->buffer_file_delete_early == FLB_TRUE){
@@ -1042,17 +1051,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                     ret = FLB_OK;
                     goto cleanup;
                 }else{
-                    /*if (pthread_mutex_lock(&ctx->buffer_mutex)) {
-                        flb_plg_error(ctx->ins, "error locking mutex");
-                        ret = FLB_ERROR;
-                        goto error;
-                    }*/
                     ret = azure_kusto_store_file_delete(ctx, upload_file);
-                    /*if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
-                        flb_plg_error(ctx->ins, "error unlocking mutex");
-                        ret = FLB_ERROR;
-                        goto error;
-                    }*/
                     if (ret != 0){
                         /* file coudn't be deleted */
                         ret = FLB_ERROR;
@@ -1070,21 +1069,9 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             }
         }
 
-        /*if (pthread_mutex_lock(&ctx->buffer_mutex)) {
-            flb_plg_error(ctx->ins, "error locking mutex");
-            ret = FLB_ERROR;
-            goto error;
-        }*/
-
         /* Buffer current chunk in filesystem and wait for next chunk from engine */
         ret = buffer_chunk(ctx, upload_file, json, json_size,
-                           event_chunk->tag, tag_len);
-
-        /*if (pthread_mutex_unlock(&ctx->buffer_mutex)) {
-            flb_plg_error(ctx->ins, "error unlocking mutex");
-            ret = FLB_ERROR;
-            goto error;
-        }*/
+                           tag_name, tag_name_len);
 
         if (ret == 0) {
             flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
@@ -1157,7 +1144,9 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
     if (is_compressed && final_payload) {
         flb_free(final_payload);
     }
-
+    if (tag_name) {
+        flb_sds_destroy(tag_name);
+    }
     FLB_OUTPUT_RETURN(ret);
 
     error:
@@ -1167,7 +1156,9 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
     if (is_compressed && final_payload) {
         flb_free(final_payload);
     }
-
+    if (tag_name) {
+        flb_sds_destroy(tag_name);
+    }
     FLB_OUTPUT_RETURN(ret);
 }
 
@@ -1286,9 +1277,9 @@ static struct flb_config_map config_map[] = {
                              offsetof(struct flb_azure_kusto, buffer_file_delete_early),
         "Whether to delete the buffered file early after successful blob creation. Default is false"
         },
-        {FLB_CONFIG_MAP_BOOL, "rewrite_tag", "false",0, FLB_TRUE,
-                offsetof(struct flb_azure_kusto, rewrite_tag),
-        "Whether to delete the buffered file early after successful blob creation. Default is false"
+        {FLB_CONFIG_MAP_BOOL, "unify_tag", "false",0, FLB_TRUE,
+                offsetof(struct flb_azure_kusto, unify_tag),
+        "This creates a single buffer file when the buffering mode is ON. Default is false"
         },
         {FLB_CONFIG_MAP_INT, "blob_uri_length", "64",0, FLB_TRUE,
                     offsetof(struct flb_azure_kusto, blob_uri_length),

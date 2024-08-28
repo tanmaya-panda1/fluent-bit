@@ -548,7 +548,7 @@ static flb_sds_t azure_kusto_create_blob_id(struct flb_azure_kusto *ctx, flb_sds
     flb_time_get(&tm);
     ms = ((tm.tm.tv_sec * 1000) + (tm.tm.tv_nsec / 1000000));
 
-    if (!ctx->rewrite_tag) {
+    if (!ctx->unify_tag) {
         b64tag = base64_encode(tag, tag_len, &b64_len);
         if (b64tag) {
             /* remove trailing '=' */
@@ -575,7 +575,7 @@ static flb_sds_t azure_kusto_create_blob_id(struct flb_azure_kusto *ctx, flb_sds
     uuid = generate_uuid();
     if (!uuid) {
         flb_plg_error(ctx->ins, "error generating UUID");
-        if (!ctx->rewrite_tag && b64tag) {
+        if (!ctx->unify_tag && b64tag) {
             flb_free(b64tag);
         }
         return NULL;
@@ -589,7 +589,7 @@ static flb_sds_t azure_kusto_create_blob_id(struct flb_azure_kusto *ctx, flb_sds
         flb_plg_error(ctx->ins, "cannot create blob id buffer");
     }
 
-    if (!ctx->rewrite_tag && b64tag) {
+    if (!ctx->unify_tag && b64tag) {
         flb_free(b64tag);
     }
     flb_free(uuid);
