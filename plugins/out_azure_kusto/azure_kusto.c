@@ -43,10 +43,11 @@ static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
     flb_sds_t imds_url;
     struct flb_upstream *upstream;
     struct flb_http_client *client;
-    struct flb_upstream_conn *u_conn;
+    struct flb_connection *u_conn;
     flb_sds_t response = NULL;
     char * token = NULL;
     char *access_token = NULL;
+    size_t resp_size;
 
     flb_plg_debug(ctx->ins, "Starting oauth2 token retrieval process");
 
@@ -88,8 +89,12 @@ static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
             return -1;
         }
 
+        /* Log the HTTP request details */
+        flb_plg_debug(ctx->ins, "HTTP Request: URL: %s", imds_url);
+        flb_plg_debug(ctx->ins, "HTTP Request: Header: Metadata: true");
+
         /* Perform the HTTP request */
-        ret = flb_http_do(client, NULL);
+        ret = flb_http_do(client, resp_size);
 
         /* Log the response status code and response payload */
         flb_plg_debug(ctx->ins, "IMDS request status code: %d", client->resp.status);
