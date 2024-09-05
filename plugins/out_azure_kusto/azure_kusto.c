@@ -187,16 +187,14 @@ flb_sds_t execute_ingest_csl_command(struct flb_azure_kusto *ctx, const char *cs
 
                     if (ret == 0) {
                         if (c->resp.status == 200) {
-                            /* Copy payload response to the response param */
-                            resp =
-                                    flb_sds_create_len(c->resp.payload, c->resp.payload_size);
-                        }
-                        else if (c->resp.payload_size > 0) {
-                            flb_plg_debug(ctx->ins, "Request failed and returned: \n%s",
-                                          c->resp.payload);
+                            // Copy payload response to the response param
+                            resp = flb_sds_create_len(c->resp.payload, c->resp.payload_size);
                         }
                         else {
-                            flb_plg_debug(ctx->ins, "Request failed");
+                            flb_plg_error(ctx->ins, "Request failed with HTTP Status: %i", c->resp.status);
+                            if (c->resp.payload_size > 0) {
+                                flb_plg_error(ctx->ins, "Response payload: \n%s", c->resp.payload);
+                            }
                         }
                     }
                     else {
@@ -473,7 +471,7 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
                               "cannot gzip payload");
                 flb_sds_destroy(payload);
                 flb_sds_destroy(tag_sds);
-                return;
+                FLB_OUTPUT_RETURN(FLB_RETRY);
             }
             else {
                 is_compressed = FLB_TRUE;
@@ -490,7 +488,7 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
         ret = azure_kusto_load_ingestion_resources(ctx, config);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "cannot load ingestion resources");
-            return;
+            FLB_OUTPUT_RETURN(FLB_RETRY);
         }
 
         flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest ::: before starting kusto queued ingestion %s", file->fsf->name);
@@ -498,7 +496,7 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
         ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), final_payload, final_payload_size, NULL);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "Failed to ingest data to Azure Blob");
-            return;
+            FLB_OUTPUT_RETURN(FLB_RETRY);
         }
 
         ret = azure_kusto_store_file_delete(ctx, file);
@@ -999,6 +997,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                  event_chunk->size, (void **)&json, &json_size);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "cannot reformat data into json");
+            ret = FLB_RETRY;
             goto error;
         }
 
@@ -1037,6 +1036,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             ret = azure_kusto_load_ingestion_resources(ctx, config);
             if (ret != 0) {
                 flb_plg_error(ctx->ins, "cannot load ingestion resources");
+                ret = FLB_RETRY;
                 goto error;
             }
 
@@ -1054,7 +1054,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                     ret = azure_kusto_store_file_delete(ctx, upload_file);
                     if (ret != 0){
                         /* file coudn't be deleted */
-                        ret = FLB_ERROR;
+                        ret = FLB_RETRY;
                         goto error;
                     } else{
                         /* file deleted successfully */

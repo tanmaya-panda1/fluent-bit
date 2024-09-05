@@ -23,10 +23,10 @@
 #include <fluent-bit/flb_output.h>
 #include <fluent-bit/flb_output_plugin.h>
 #include <fluent-bit/flb_sds.h>
-#include <fluent-bit/flb_time.h>
-#include <fluent-bit/flb_unescape.h>
 #include <fluent-bit/flb_upstream_ha.h>
 #include <fluent-bit/flb_utils.h>
+#include <sys/time.h>
+#include <openssl/sha.h>
 
 #include "azure_kusto.h"
 #include "azure_kusto_conf.h"
@@ -438,20 +438,42 @@ static flb_sds_t parse_ingestion_identity_token(struct flb_azure_kusto *ctx,
 
 
 /**
- * This method returns random integers from range -600 to +600 which needs to be added
+ * This method returns random integers from range -600 to +3600 which needs to be added
  * to the kusto ingestion resources refresh interval to even out the spikes
  * in kusto DM for .get ingestion resources upon expiry
  * */
 int azure_kusto_generate_random_integer() {
-    // Seed the random number generator
-    int pid = getpid();
-    unsigned long address = (unsigned long)&address;
-    unsigned int seed = pid ^ (address & 0xFFFFFFFF) * time(0);
+    // Retrieve the Kubernetes Pod ID from the environment variable
+    const char *pod_id = getenv("HOSTNAME");
+    if (pod_id == NULL) {
+        // Fallback to process ID if the environment variable is not set
+        pod_id = "default_pod_id";
+    }
+
+    // Get the current time with high resolution
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+
+    // Get the process ID
+    pid_t pid = getpid();
+
+    // Combine pod ID, current time, and process ID into a single string
+    char combined[256];
+    snprintf(combined, sizeof(combined), "%s%ld%d%d", pod_id, tv.tv_sec, tv.tv_usec, pid);
+
+    // Compute SHA-256 hash of the combined string
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256((unsigned char*)combined, strlen(combined), hash);
+
+    // Use the first 4 bytes of the hash as the seed
+    unsigned int seed = *(unsigned int*)hash;
     srand(seed);
-    // Generate a random integer in the range [-600, 600]
-    int random_integer = rand() % 1201 - 600;
+
+    // Generate a random integer in the range [-600, 3600]
+    int random_integer = rand() % 4201 - 600;
     return random_integer;
 }
+
 
 int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
                                          struct flb_config *config)
@@ -464,7 +486,6 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
     time_t now;
 
     int generated_random_integer = azure_kusto_generate_random_integer();
-    flb_plg_debug(ctx->ins, "check if the latest changes are there 4");
     flb_plg_debug(ctx->ins, "generated random integer %d", generated_random_integer);
 
     now = time(NULL);
@@ -544,6 +565,7 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
                                 flb_plg_error(ctx->ins,
                                               "error parsing ingestion identity token");
                                 ret = -1;
+                                goto cleanup;
                             }
                             if (pthread_mutex_unlock(&ctx->resources_mutex)) {
                                 flb_plg_error(ctx->ins, "error unlocking mutex");
@@ -554,12 +576,14 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
                         else {
                             flb_plg_error(ctx->ins, "error getting kusto identity token");
                             ret = -1;
+                            goto cleanup;
                         }
                     }
                     else {
                         flb_plg_error(ctx->ins,
                                       "error parsing ingestion storage resources");
                         ret = -1;
+                        goto cleanup;
                     }
 
                     if (ret == -1) {
@@ -570,6 +594,7 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
                 else {
                     flb_plg_error(ctx->ins, "error creating storage resources upstreams");
                     ret = -1;
+                    goto cleanup;
                 }
 
                 if (ret == -1) {
@@ -579,6 +604,8 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
             }
             else {
                 flb_plg_error(ctx->ins, "error creating storage resources upstreams");
+                ret = -1;
+                goto cleanup;
             }
 
             if (response) {
@@ -587,8 +614,12 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
         }
         if (!response) {
             flb_plg_error(ctx->ins, "error getting ingestion storage resources");
+            ret = -1;
+            goto cleanup;
         }
     }
+
+    return ret;
 
     cleanup:
     if (ret == -1) {
