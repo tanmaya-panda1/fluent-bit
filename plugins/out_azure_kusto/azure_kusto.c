@@ -52,118 +52,25 @@ static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
     flb_plg_debug(ctx->ins, "Starting oauth2 token retrieval process");
 
     /* Check if IMDS-based token retrieval is needed */
-    if (!ctx->client_secret && ctx->client_id && ctx->tenant_id) {
-        /* Construct the IMDS URL */
-        imds_url = flb_sds_create("http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/");
-        if (!imds_url) {
-            flb_plg_error(ctx->ins, "Error creating IMDS URL");
+    if (ctx->use_imds == FLB_TRUE) {
+        /* Use client secret flow */
+        flb_plg_debug(ctx->ins, "Using client imds for token retrieval");
+
+        flb_oauth2_payload_clear(ctx->o);
+
+        ret = flb_oauth2_payload_append(ctx->o, "Metadata", 8, "true", 4);
+        if (ret == -1) {
+            flb_plg_error(ctx->ins, "Error appending oauth2 params: Metadata");
             return -1;
         }
 
-        /* Create an 'upstream' context for the IMDS endpoint */
-        upstream = flb_upstream_create(ctx->config, "169.254.169.254", 80, FLB_IO_TCP, NULL);
-        if (!upstream) {
-            flb_plg_error(ctx->ins, "Connection initialization error");
-            flb_sds_destroy(imds_url);
+        flb_plg_debug(ctx->ins, "Requesting oauth2 token");
+        token = flb_oauth2_token_get(ctx->o);
+        flb_plg_debug(ctx->ins, "Retrieved oauth2 access token: %s", token);
+        if (!token) {
+            flb_plg_error(ctx->ins, "Error retrieving oauth2 access token");
             return -1;
         }
-
-        /* Retrieve a connection from the 'upstream' context */
-        u_conn = flb_upstream_conn_get(upstream);
-        if (!u_conn) {
-            flb_plg_error(ctx->ins, "Cannot create upstream connection for IMDS endpoint");
-            flb_upstream_destroy(upstream);
-            flb_sds_destroy(imds_url);
-            return -1;
-        }
-
-        /* Create HTTP Client request/context */
-        client = flb_http_client(u_conn, FLB_HTTP_GET, imds_url, NULL, 0, NULL, 0, NULL, 0);
-        flb_http_add_header(client, "Metadata", 8, "true", 4);
-
-        if (!client) {
-            flb_plg_error(ctx->ins, "Could not create HTTP client");
-            flb_upstream_conn_release(u_conn);
-            flb_upstream_destroy(upstream);
-            flb_sds_destroy(imds_url);
-            return -1;
-        }
-
-        /* Log the HTTP request details */
-        flb_plg_debug(ctx->ins, "HTTP Request: URL: %s", imds_url);
-        flb_plg_debug(ctx->ins, "HTTP Request: Header: Metadata: true");
-
-        /* Perform the HTTP request */
-        ret = flb_http_do(client, resp_size);
-
-        /* Log the response status code and response payload */
-        flb_plg_debug(ctx->ins, "IMDS request status code: %d", client->resp.status);
-
-        if (client->resp.payload_size > 0) {
-            flb_plg_debug(ctx->ins, "IMDS response: %s", client->resp.payload);
-        } else {
-            flb_plg_debug(ctx->ins, "IMDS response is empty");
-        }
-
-        if (ret != 0 || client->resp.status != 200) {
-            flb_plg_error(ctx->ins, "Error retrieving token from IMDS endpoint. HTTP status: %d", client->resp.status);
-            flb_http_client_destroy(client);
-            flb_upstream_conn_release(u_conn);
-            flb_upstream_destroy(upstream);
-            flb_sds_destroy(imds_url);
-            return -1;
-        }
-
-        /* Copy payload response to an output SDS buffer */
-        response = flb_sds_create_len(client->resp.payload, client->resp.payload_size);
-        if (!response) {
-            flb_plg_error(ctx->ins, "Error creating response buffer");
-            flb_http_client_destroy(client);
-            flb_upstream_conn_release(u_conn);
-            flb_upstream_destroy(upstream);
-            flb_sds_destroy(imds_url);
-            return -1;
-        }
-
-        /* Parse the JSON response to extract the access token */
-        flb_plg_debug(ctx->ins, "Parsing IMDS response for access token");
-        char *p = strstr(response, "\"access_token\":\"");
-        if (p) {
-            p += strlen("\"access_token\":\"");
-            char *end = strstr(p, "\"");
-            if (end) {
-                size_t access_token_len = end - p;
-                access_token = flb_malloc(access_token_len + 1);
-                if (access_token) {
-                    strncpy(access_token, p, access_token_len);
-                    access_token[access_token_len] = '\0';
-                    flb_plg_debug(ctx->ins, "Access token extracted successfully");
-                }
-            }
-        }
-
-        if (!access_token) {
-            flb_plg_error(ctx->ins, "Error extracting access token from IMDS response");
-            flb_sds_destroy(response);
-            flb_http_client_destroy(client);
-            flb_upstream_conn_release(u_conn);
-            flb_upstream_destroy(upstream);
-            flb_sds_destroy(imds_url);
-            return -1;
-        }
-
-        /* Update the OAuth2 context with the retrieved token */
-        flb_plg_debug(ctx->ins, "Updating OAuth2 context with the retrieved token");
-        ctx->o->access_token = flb_sds_create(access_token);
-        ctx->o->token_type = flb_sds_create("Bearer");
-        flb_free(access_token);
-
-        /* Cleanup */
-        flb_sds_destroy(response);
-        flb_http_client_destroy(client);
-        flb_upstream_conn_release(u_conn);
-        flb_upstream_destroy(upstream);
-        flb_sds_destroy(imds_url);
     } else {
         /* Use client secret flow */
         flb_plg_debug(ctx->ins, "Using client secret flow for token retrieval");
@@ -912,8 +819,13 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
     flb_plg_debug(ctx->ins, "async flag is %d", flb_stream_is_async(&ctx->u->base));
 
     /* Create oauth2 context */
-    ctx->o =
-            flb_oauth2_create(ctx->config, ctx->oauth_url, FLB_AZURE_KUSTO_TOKEN_REFRESH);
+    if(ctx->use_imds == FLB_TRUE){
+        ctx->o =
+                flb_oauth2_create(ctx->config, ctx->imds_url, FLB_AZURE_KUSTO_TOKEN_REFRESH);
+    } else{
+        ctx->o =
+                flb_oauth2_create(ctx->config, ctx->oauth_url, FLB_AZURE_KUSTO_TOKEN_REFRESH);
+    }
     if (!ctx->o) {
         flb_plg_error(ctx->ins, "cannot create oauth2 context");
         return -1;
@@ -1537,6 +1449,10 @@ static struct flb_config_map config_map[] = {
         {FLB_CONFIG_MAP_BOOL, "rewrite_tag", "false",0, FLB_TRUE,
                 offsetof(struct flb_azure_kusto, rewrite_tag),
         "Whether to delete the buffered file early after successful blob creation. Default is false"
+        },
+        {FLB_CONFIG_MAP_BOOL, "use_imds", "false",0, FLB_TRUE,
+                offsetof(struct flb_azure_kusto, use_imds),
+        "Whether to use IMDS to retrieve oauth token. Default is false"
         },
         /* EOF */
         {0}};

@@ -43,6 +43,10 @@
 #define FLB_MSAL_AUTH_URL_TEMPLATE \
     "https://login.microsoftonline.com/%s/oauth2/v2.0/token"
 
+/* MSAL authorization URL  */
+#define FLB_IMDS_URL_TEMPLATE \
+    "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/"
+
 #define FLB_AZURE_KUSTO_MGMT_URI_PATH "/v1/rest/mgmt"
 #define FLB_AZURE_KUSTO_MGMT_BODY_TEMPLATE "{\"csl\":\"%s\", \"db\": \"NetDefaultDB\"}"
 
@@ -106,6 +110,8 @@ struct flb_azure_kusto {
 
     /* oauth2 context */
     flb_sds_t oauth_url;
+    flb_sds_t imds_url;
+    int use_imds;
     struct flb_oauth2 *o;
 
     int timer_created;
