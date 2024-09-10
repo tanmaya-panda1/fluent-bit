@@ -153,6 +153,8 @@ struct flb_azure_kusto {
     /* Upstream connection to the backend server */
     struct flb_upstream *u;
 
+    struct flb_upstream *imds_upstream;
+
     /* Fluent Bit context */
     struct flb_config *config;
 

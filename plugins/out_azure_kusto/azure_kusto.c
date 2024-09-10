@@ -56,21 +56,77 @@ static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
         /* Use client secret flow */
         flb_plg_debug(ctx->ins, "Using client imds for token retrieval");
 
-        flb_oauth2_payload_clear(ctx->o);
-
-        ret = flb_oauth2_payload_append(ctx->o, "Metadata", 8, "true", 4);
-        if (ret == -1) {
-            flb_plg_error(ctx->ins, "Error appending oauth2 params: Metadata");
+        imds_url = flb_sds_create("http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/");
+        if (!imds_url) {
+            flb_plg_error(ctx->ins, "error creating IMDS URL");
             return -1;
         }
 
-        flb_plg_debug(ctx->ins, "Requesting oauth2 token");
-        token = flb_oauth2_token_get(ctx->o);
-        flb_plg_debug(ctx->ins, "Retrieved oauth2 access token: %s", token);
-        if (!token) {
-            flb_plg_error(ctx->ins, "Error retrieving oauth2 access token");
+        u_conn = flb_upstream_conn_get(ctx->imds_upstream);
+        if (!u_conn) {
+            flb_plg_error(ctx->ins, "cannot create upstream connection for IMDS endpoint");
+            flb_sds_destroy(imds_url);
             return -1;
         }
+
+        client = flb_http_client(u_conn, FLB_HTTP_GET, imds_url, NULL, 0, NULL, 0, NULL, 0);
+        flb_http_add_header(client, "Metadata", 8, "true", 4);
+
+        ret = flb_http_do(client, NULL);
+        if (ret != 0 || client->resp.status != 200) {
+            flb_plg_error(ctx->ins, "error retrieving token from IMDS endpoint");
+            flb_http_client_destroy(client);
+            flb_upstream_conn_release(u_conn);
+            flb_sds_destroy(imds_url);
+            return -1;
+        }
+
+        response = flb_sds_create_len(client->resp.payload, client->resp.payload_size);
+        if (!response) {
+            flb_plg_error(ctx->ins, "error creating response buffer");
+            flb_http_client_destroy(client);
+            flb_upstream_conn_release(u_conn);
+            flb_sds_destroy(imds_url);
+            return -1;
+        }
+
+        // Parse the JSON response to extract the access token
+        size_t access_token_len = 0;
+        char *p = strstr(response, "\"access_token\":\"");
+        if (p) {
+            p += strlen("\"access_token\":\"");
+            char *end = strstr(p, "\"");
+            if (end) {
+                access_token_len = end - p;
+                access_token = flb_malloc(access_token_len + 1);
+                if (access_token) {
+                    strncpy(access_token, p, access_token_len);
+                    access_token[access_token_len] = '\0';
+                }
+            }
+        }
+
+
+        if (!access_token) {
+            flb_plg_error(ctx->ins, "error extracting access token from IMDS response");
+            flb_sds_destroy(response);
+            flb_http_client_destroy(client);
+            flb_upstream_conn_release(u_conn);
+            flb_sds_destroy(imds_url);
+            return -1;
+        }
+
+        // Update the OAuth2 context with the retrieved token
+        ctx->o->access_token = flb_sds_create(access_token);
+        ctx->o->token_type = flb_sds_create("Bearer");
+        flb_free(access_token);
+
+        flb_sds_destroy(response);
+        flb_http_client_destroy(client);
+        flb_upstream_conn_release(u_conn);
+        flb_sds_destroy(imds_url);
+
+
     } else {
         /* Use client secret flow */
         flb_plg_debug(ctx->ins, "Using client secret flow for token retrieval");
@@ -820,8 +876,9 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
 
     /* Create oauth2 context */
     if(ctx->use_imds == FLB_TRUE){
-        ctx->o =
-                flb_oauth2_create(ctx->config, ctx->imds_url, FLB_AZURE_KUSTO_TOKEN_REFRESH);
+        ctx->imds_upstream =
+                flb_upstream_create_url(ctx->config, ctx->imds_url, io_flags, ins->tls);
+        //flb_stream_disable_async_mode(&ctx->imds_upstream->base);
     } else{
         ctx->o =
                 flb_oauth2_create(ctx->config, ctx->oauth_url, FLB_AZURE_KUSTO_TOKEN_REFRESH);
