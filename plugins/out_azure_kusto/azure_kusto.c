@@ -878,7 +878,7 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
     if(ctx->use_imds == FLB_TRUE){
         ctx->imds_upstream =
                 flb_upstream_create_url(ctx->config, ctx->imds_url, io_flags, ins->tls);
-        //flb_stream_disable_async_mode(&ctx->imds_upstream->base);
+        flb_stream_disable_flags(&ctx->imds_upstream->base, FLB_IO_ASYNC);
     }
     ctx->o =
             flb_oauth2_create(ctx->config, ctx->oauth_url, FLB_AZURE_KUSTO_TOKEN_REFRESH);
