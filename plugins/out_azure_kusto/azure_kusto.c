@@ -879,10 +879,9 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
         ctx->imds_upstream =
                 flb_upstream_create_url(ctx->config, ctx->imds_url, io_flags, ins->tls);
         //flb_stream_disable_async_mode(&ctx->imds_upstream->base);
-    } else{
-        ctx->o =
-                flb_oauth2_create(ctx->config, ctx->oauth_url, FLB_AZURE_KUSTO_TOKEN_REFRESH);
     }
+    ctx->o =
+            flb_oauth2_create(ctx->config, ctx->oauth_url, FLB_AZURE_KUSTO_TOKEN_REFRESH);
     if (!ctx->o) {
         flb_plg_error(ctx->ins, "cannot create oauth2 context");
         return -1;
