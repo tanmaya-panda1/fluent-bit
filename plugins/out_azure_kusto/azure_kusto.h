@@ -45,7 +45,7 @@
 
 /* MSAL authorization URL  */
 #define FLB_IMDS_URL_TEMPLATE \
-    "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/"
+    "http://169.254.169.254/metadata/identity/oauth2/token"
 
 #define FLB_AZURE_KUSTO_MGMT_URI_PATH "/v1/rest/mgmt"
 #define FLB_AZURE_KUSTO_MGMT_BODY_TEMPLATE "{\"csl\":\"%s\", \"db\": \"NetDefaultDB\"}"
