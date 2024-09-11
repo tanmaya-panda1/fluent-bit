@@ -88,11 +88,17 @@ flb_sds_t flb_azure_imds_get_token(struct flb_azure_imds *ctx)
 
     ret = flb_http_do(client, &b_sent);
     if (ret != 0 || client->resp.status != 200) {
+        flb_error("[example] connection initialization error");
+        flb_error("[example] HTTP response status: %d", client->resp.status);
+        flb_error("[example] HTTP response payload: %.*s", (int)client->resp.payload_size, client->resp.payload);
         flb_http_client_destroy(client);
         flb_upstream_conn_release(u_conn);
         flb_sds_destroy(url);
         return NULL;
     }
+
+    flb_debug("[example] HTTP response status: %d", client->resp.status);
+    flb_debug("[example] HTTP response payload: %.*s", (int)client->resp.payload_size, client->resp.payload);
 
     response = flb_sds_create_len(client->resp.payload, client->resp.payload_size);
     flb_http_client_destroy(client);
