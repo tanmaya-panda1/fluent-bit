@@ -41,6 +41,8 @@ struct flb_azure_imds *flb_azure_imds_create(struct flb_config *config)
         return NULL;
     }
 
+    flb_stream_disable_flags(&ctx->upstream->base, FLB_IO_ASYNC);
+
     ctx->config = config;
     return ctx;
 }
