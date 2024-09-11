@@ -35,81 +35,33 @@
 #include "azure_kusto_conf.h"
 #include "azure_kusto_ingest.h"
 #include "azure_kusto_store.h"
-#include <curl/curl.h>
+#include "azure_imds.h"
 
-static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp)
-{
-    size_t realsize = size * nmemb;
-    flb_sds_t *response = (flb_sds_t *)userp;
-
-    *response = flb_sds_cat(*response, contents, realsize);
-    return realsize;
-}
 
 static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
 {
-    int ret;
-    flb_sds_t imds_url;
-    flb_sds_t response = NULL;
     char *token = NULL;
+    int ret;
+    flb_sds_t response = NULL;
     char *access_token = NULL;
-    CURL *curl;
-    CURLcode res;
+    struct flb_azure_imds *imds_ctx;
 
     flb_plg_debug(ctx->ins, "Starting oauth2 token retrieval process");
 
     /* Check if IMDS-based token retrieval is needed */
     if (ctx->use_imds == FLB_TRUE) {
-        /* Use client secret flow */
-        flb_plg_debug(ctx->ins, "Using client imds for token retrieval");
+        flb_plg_debug(ctx->ins, "Using IMDS for token retrieval");
 
-        imds_url = flb_sds_create("http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/");
-        if (!imds_url) {
-            flb_plg_error(ctx->ins, "error creating IMDS URL");
+        imds_ctx = flb_azure_imds_create(ctx->config);
+        if (!imds_ctx) {
+            flb_plg_error(ctx->ins, "Failed to create Azure IMDS context");
             return -1;
         }
 
-        curl = curl_easy_init();
-        if (!curl) {
-            flb_plg_error(ctx->ins, "error initializing curl");
-            flb_sds_destroy(imds_url);
-            return -1;
-        }
-
-        response = flb_sds_create_size(1024); // Initial buffer size for response
+        response = flb_azure_imds_get_token(imds_ctx);
         if (!response) {
-            flb_plg_error(ctx->ins, "error creating response buffer");
-            curl_easy_cleanup(curl);
-            flb_sds_destroy(imds_url);
-            return -1;
-        }
-
-        curl_easy_setopt(curl, CURLOPT_URL, imds_url);
-        curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-        struct curl_slist *headers = NULL;
-        headers = curl_slist_append(headers, "Metadata: true");
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-
-        res = curl_easy_perform(curl);
-        if (res != CURLE_OK) {
-            flb_plg_error(ctx->ins, "curl_easy_perform() failed: %s", curl_easy_strerror(res));
-            curl_slist_free_all(headers);
-            curl_easy_cleanup(curl);
-            flb_sds_destroy(response);
-            flb_sds_destroy(imds_url);
-            return -1;
-        }
-
-        long http_code = 0;
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-        if (http_code != 200) {
-            flb_plg_error(ctx->ins, "error retrieving token from IMDS endpoint, HTTP status: %ld", http_code);
-            curl_slist_free_all(headers);
-            curl_easy_cleanup(curl);
-            flb_sds_destroy(response);
-            flb_sds_destroy(imds_url);
+            flb_plg_error(ctx->ins, "Failed to retrieve token from Azure IMDS");
+            flb_azure_imds_destroy(imds_ctx);
             return -1;
         }
 
@@ -130,23 +82,18 @@ static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
         }
 
         if (!access_token) {
-            flb_plg_error(ctx->ins, "error extracting access token from IMDS response");
-            curl_slist_free_all(headers);
-            curl_easy_cleanup(curl);
+            flb_plg_error(ctx->ins, "Error extracting access token from IMDS response");
             flb_sds_destroy(response);
-            flb_sds_destroy(imds_url);
+            flb_azure_imds_destroy(imds_ctx);
             return -1;
         }
 
-        // Update the OAuth2 context with the retrieved token
         ctx->o->access_token = flb_sds_create(access_token);
         ctx->o->token_type = flb_sds_create("Bearer");
         flb_free(access_token);
 
-        curl_slist_free_all(headers);
-        curl_easy_cleanup(curl);
         flb_sds_destroy(response);
-        flb_sds_destroy(imds_url);
+        flb_azure_imds_destroy(imds_ctx);
 
     } else {
         /* Use client secret flow */
