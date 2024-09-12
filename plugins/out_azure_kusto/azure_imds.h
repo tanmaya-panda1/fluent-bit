@@ -25,7 +25,7 @@
 #include <fluent-bit/flb_upstream.h>
 #include <fluent-bit/flb_http_client.h>
 
-#define FLB_AZURE_IMDS_ENDPOINT "http://169.254.169.254/metadata/identity/oauth2/token"
+#define FLB_AZURE_IMDS_ENDPOINT "/metadata/identity/oauth2/token"
 #define FLB_AZURE_IMDS_API_VERSION "2018-02-01"
 #define FLB_AZURE_IMDS_RESOURCE "https://management.azure.com/"
 
