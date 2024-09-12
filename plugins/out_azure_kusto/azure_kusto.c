@@ -174,7 +174,7 @@ static int azure_kusto_get_oauth2_token_ext2(struct flb_azure_kusto *ctx)
 
         client = flb_http_client(u_conn, FLB_HTTP_GET, imds_url, NULL, 0, NULL, 0, NULL, 0);
         flb_http_add_header(client, "Metadata", 8, "true", 4);
-        flb_http_add_header(c, "client_id", 9, ctx->client_id, flb_sds_len(ctx->client_id));
+        flb_http_add_header(client, "client_id", 9, ctx->client_id, flb_sds_len(ctx->client_id));
 
         ret = flb_http_do(client, NULL);
         if (ret != 0 || client->resp.status != 200) {
