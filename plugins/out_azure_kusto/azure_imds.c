@@ -57,7 +57,7 @@ void flb_azure_imds_destroy(struct flb_azure_imds *ctx)
     }
 }
 
-flb_sds_t flb_azure_imds_get_token(struct flb_azure_imds *ctx)
+flb_sds_t flb_azure_imds_get_token(struct flb_azure_imds *ctx, flb_sds_t client_id)
 {
     int ret;
     flb_sds_t url;
@@ -87,7 +87,7 @@ flb_sds_t flb_azure_imds_get_token(struct flb_azure_imds *ctx)
 
     client = flb_http_client(u_conn, FLB_HTTP_GET, url, NULL, 0, "169.254.169.254", 80, NULL, 0);
     flb_http_add_header(client, "Metadata", 8, "true", 4);
-    flb_http_add_header(client, "client_id", 8, "8462debb-6529-4dcf-94cd-7546ff372e63", 36);
+    flb_http_add_header(client, "client_id", 8, client_id, 36);
 
     ret = flb_http_do(client, &b_sent);
     if (ret != 0 || client->resp.status != 200) {

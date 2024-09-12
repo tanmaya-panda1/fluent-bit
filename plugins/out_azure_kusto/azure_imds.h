@@ -36,6 +36,6 @@ struct flb_azure_imds {
 
 struct flb_azure_imds *flb_azure_imds_create(struct flb_config *config);
 void flb_azure_imds_destroy(struct flb_azure_imds *ctx);
-flb_sds_t flb_azure_imds_get_token(struct flb_azure_imds *ctx);
+flb_sds_t flb_azure_imds_get_token(struct flb_azure_imds *ctx, flb_sds_t client_id);
 
 #endif
