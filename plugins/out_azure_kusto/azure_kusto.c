@@ -81,6 +81,8 @@ static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
             }
         }
 
+        flb_plg_debug(ctx->ins, "Access token extracted is %s", access_token);
+
         if (!access_token) {
             flb_plg_error(ctx->ins, "Error extracting access token from IMDS response");
             flb_sds_destroy(response);
@@ -404,6 +406,9 @@ flb_sds_t get_azure_kusto_token(struct flb_azure_kusto *ctx)
     if (flb_oauth2_token_expired(ctx->o) == FLB_TRUE) {
         ret = azure_kusto_get_oauth2_token(ctx);
     }
+
+    flb_plg_debug(ctx->ins, "oauth token type is %s", ctx->o->token_type);
+    flb_plg_debug(ctx->ins, "oauth token is %s", ctx->o->access_token);
 
     /* Copy string to prevent race conditions (get_oauth2 can free the string) */
     if (ret == 0) {
