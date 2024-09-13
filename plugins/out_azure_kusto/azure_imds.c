@@ -84,6 +84,7 @@ flb_sds_t flb_azure_imds_get_token(struct flb_azure_imds *ctx, flb_sds_t client_
     }
 
     flb_debug("[example] HTTP uri to be hit status: %s", url);
+    flb_debug("[example] client_id : %s", client_id);
 
     client = flb_http_client(u_conn, FLB_HTTP_GET, url, NULL, 0, "169.254.169.254", 80, NULL, 0);
     flb_http_add_header(client, "Metadata", 8, "true", 4);
