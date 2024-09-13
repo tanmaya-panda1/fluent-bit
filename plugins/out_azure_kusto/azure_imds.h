@@ -27,7 +27,7 @@
 
 #define FLB_AZURE_IMDS_ENDPOINT "/metadata/identity/oauth2/token"
 #define FLB_AZURE_IMDS_API_VERSION "2018-02-01"
-#define FLB_AZURE_IMDS_RESOURCE "https://management.azure.com/"
+#define FLB_AZURE_IMDS_RESOURCE "https://api.kusto.windows.net/"
 
 struct flb_azure_imds {
     struct flb_upstream *upstream;
