@@ -410,8 +410,133 @@ static int ingest_all_chunks(struct flb_azure_kusto *ctx, struct flb_config *con
     return 0;
 }
 
-
 static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
+{
+    struct flb_azure_kusto *ctx = data;
+    struct azure_kusto_file *file = NULL;
+    struct flb_fstore_file *fsf;
+    char *buffer = NULL;
+    size_t buffer_size = 0;
+    void *final_payload = NULL;
+    size_t final_payload_size = 0;
+    struct mk_list *tmp;
+    struct mk_list *head;
+    int ret;
+    time_t now;
+    flb_sds_t payload;
+    flb_sds_t tag_sds;
+    int is_compressed = FLB_FALSE;
+    int retry_count;
+
+    // Log the start of the upload timer callback
+    flb_plg_debug(ctx->ins, "Running upload timer callback (cb_azure_kusto_ingest)..");
+    now = time(NULL);
+
+    // Iterate over all files in the active stream
+    mk_list_foreach_safe(head, tmp, &ctx->stream_active->files) {
+        fsf = mk_list_entry(head, struct flb_fstore_file, _head);
+        file = fsf->data;
+        flb_plg_debug(ctx->ins, "Iterating files inside upload timer callback (cb_azure_kusto_ingest).. %s", file->fsf->name);
+
+        // Check if the file has timed out
+        if (now < (file->create_time + ctx->upload_timeout + ctx->retry_time)) {
+            continue; // Skip files that haven't timed out
+        }
+
+        flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest :: Before file locked check %s", file->fsf->name);
+
+        // Skip locked files
+        if (file->locked == FLB_TRUE) {
+            continue;
+        }
+
+        retry_count = 0;
+        // Retry loop for handling retries
+        while (retry_count < ctx->scheduler_max_retries) {
+            flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest :: Before construct_request_buffer %s", file->fsf->name);
+
+            // Construct the request buffer
+            ret = construct_request_buffer(ctx, NULL, file, &buffer, &buffer_size);
+            if (ret < 0) {
+                flb_plg_error(ctx->ins, "Could not construct request buffer for %s", file->fsf->name);
+                retry_count++;
+                continue; // Retry on failure
+            }
+
+            payload = flb_sds_create_len(buffer, buffer_size);
+            tag_sds = flb_sds_create(fsf->meta_buf);
+
+            // Compress the JSON payload if compression is enabled
+            if (ctx->compression_enabled == FLB_TRUE) {
+                ret = flb_gzip_compress((void *) payload, flb_sds_len(payload), &final_payload, &final_payload_size);
+                if (ret != 0) {
+                    flb_plg_error(ctx->ins, "cannot gzip payload");
+                    flb_sds_destroy(payload);
+                    flb_sds_destroy(tag_sds);
+                    retry_count++;
+                    continue; // Retry on failure
+                } else {
+                    is_compressed = FLB_TRUE;
+                    flb_plg_debug(ctx->ins, "enabled payload gzip compression");
+                }
+            } else {
+                final_payload = payload;
+                final_payload_size = flb_sds_len(payload);
+            }
+
+            flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest ::: tag of the file %s", tag_sds);
+
+            // Load ingestion resources
+            ret = azure_kusto_load_ingestion_resources(ctx, config);
+            if (ret != 0) {
+                flb_plg_error(ctx->ins, "cannot load ingestion resources");
+                retry_count++;
+                continue; // Retry on failure
+            }
+
+            flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest ::: before starting kusto queued ingestion %s", file->fsf->name);
+
+            // Perform the queued ingestion
+            ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), final_payload, final_payload_size, NULL);
+            if (ret != 0) {
+                flb_plg_error(ctx->ins, "Failed to ingest data to Azure Blob");
+                retry_count++;
+                continue; // Retry on failure
+            }
+
+            // Delete the file after successful ingestion
+            ret = azure_kusto_store_file_delete(ctx, file);
+            if (ret == 0) {
+                flb_plg_debug(ctx->ins, "deleted successfully ingested file %s", fsf->name);
+            } else {
+                flb_plg_error(ctx->ins, "failed to delete ingested file %s", fsf->name);
+            }
+
+            // Free allocated resources
+            flb_free(buffer);
+            flb_sds_destroy(payload);
+            flb_sds_destroy(tag_sds);
+            if (is_compressed) {
+                flb_free(final_payload);
+            }
+
+            // If all operations succeed, break out of the retry loop
+            break;
+        }
+
+        // If the maximum number of retries is reached, log an error and move to the next file
+        if (retry_count >= ctx->scheduler_max_retries) {
+            flb_plg_error(ctx->ins, "Max retries reached for file %s", file->fsf->name);
+            file->locked = FLB_FALSE; // Unlock the file for retry in the next iteration
+        }
+    }
+    // Log the end of the upload timer callback
+    flb_plg_debug(ctx->ins, "Exited upload timer callback (cb_azure_kusto_ingest)..");
+}
+
+
+
+static void cb_azure_kusto_ingest_ext(struct flb_config *config, void *data)
 {
     struct flb_azure_kusto *ctx = data;
     struct azure_kusto_file *file = NULL;
@@ -1284,6 +1409,10 @@ static struct flb_config_map config_map[] = {
         {FLB_CONFIG_MAP_INT, "blob_uri_length", "64",0, FLB_TRUE,
                     offsetof(struct flb_azure_kusto, blob_uri_length),
             "Set the length of generated blob uri before ingesting to kusto. Default is 64"
+        },
+        {FLB_CONFIG_MAP_INT, "scheduler_max_retries", "64",0, FLB_TRUE,
+         offsetof(struct flb_azure_kusto, scheduler_max_retries),
+        "Set the maximum number of retries for ingestion using the scheduler. Default is 3"
         },
         /* EOF */
         {0}};
