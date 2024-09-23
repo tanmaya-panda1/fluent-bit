@@ -1410,7 +1410,7 @@ static struct flb_config_map config_map[] = {
                     offsetof(struct flb_azure_kusto, blob_uri_length),
             "Set the length of generated blob uri before ingesting to kusto. Default is 64"
         },
-        {FLB_CONFIG_MAP_INT, "scheduler_max_retries", "64",0, FLB_TRUE,
+        {FLB_CONFIG_MAP_INT, "scheduler_max_retries", "3",0, FLB_TRUE,
          offsetof(struct flb_azure_kusto, scheduler_max_retries),
         "Set the maximum number of retries for ingestion using the scheduler. Default is 3"
         },
