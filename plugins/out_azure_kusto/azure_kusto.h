@@ -66,6 +66,10 @@
 #define UPLOAD_TIMER_MIN_WAIT 18000
 #define MAX_FILE_SIZE         4000000000 // 4GB
 
+#define FLB_AZURE_IMDS_ENDPOINT "/metadata/identity/oauth2/token"
+#define FLB_AZURE_IMDS_API_VERSION "2018-02-01"
+#define FLB_AZURE_IMDS_RESOURCE "https://api.kusto.windows.net/"
+
 
 struct flb_azure_kusto_resources {
     struct flb_upstream_ha *blob_ha;
@@ -106,6 +110,8 @@ struct flb_azure_kusto {
 
     /* oauth2 context */
     flb_sds_t oauth_url;
+    //flb_sds_t imds_url;
+    int use_imds;
     struct flb_oauth2 *o;
 
     int timer_created;
@@ -148,6 +154,8 @@ struct flb_azure_kusto {
 
     /* Upstream connection to the backend server */
     struct flb_upstream *u;
+
+    struct flb_upstream *imds_upstream;
 
     /* Fluent Bit context */
     struct flb_config *config;

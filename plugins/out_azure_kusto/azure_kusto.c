@@ -36,48 +36,153 @@
 #include "azure_kusto_ingest.h"
 #include "azure_kusto_store.h"
 
-/* Create a new oauth2 context and get a oauth2 token */
-static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
+
+flb_sds_t flb_azure_imds_get_token(struct flb_azure_kusto *ctx, flb_sds_t client_id)
 {
     int ret;
-    char *token;
+    flb_sds_t url;
+    flb_sds_t response = NULL;
+    struct flb_http_client *client;
+    struct flb_connection *u_conn;
+    size_t b_sent;
 
-    /* Clear any previous oauth2 payload content */
-    flb_oauth2_payload_clear(ctx->o);
-
-    ret = flb_oauth2_payload_append(ctx->o, "grant_type", 10, "client_credentials", 18);
-    if (ret == -1) {
-        flb_plg_error(ctx->ins, "error appending oauth2 params");
-        return -1;
+    url = flb_sds_create_size(256);
+    if (!url) {
+        flb_errno();
+        return NULL;
     }
 
-    ret = flb_oauth2_payload_append(ctx->o, "scope", 5, FLB_AZURE_KUSTO_SCOPE, 39);
-    if (ret == -1) {
-        flb_plg_error(ctx->ins, "error appending oauth2 params");
-        return -1;
+    flb_sds_printf(&url, "%s?api-version=%s&resource=%s",
+                   FLB_AZURE_IMDS_ENDPOINT,
+                   FLB_AZURE_IMDS_API_VERSION,
+                   FLB_AZURE_IMDS_RESOURCE);
+
+    u_conn = flb_upstream_conn_get(ctx->imds_upstream);
+    if (!u_conn) {
+        flb_sds_destroy(url);
+        return NULL;
     }
 
-    ret = flb_oauth2_payload_append(ctx->o, "client_id", 9, ctx->client_id, -1);
-    if (ret == -1) {
-        flb_plg_error(ctx->ins, "error appending oauth2 params");
-        return -1;
+    flb_plg_debug(ctx->ins, " HTTP uri to be hit status: %s", url);
+    flb_plg_debug(ctx->ins, "[flb_azure_imds_get_token] client_id : %s", client_id);
+
+    client = flb_http_client(u_conn, FLB_HTTP_GET, url, NULL, 0, "169.254.169.254", 80, NULL, 0);
+    flb_http_add_header(client, "Metadata", 8, "true", 4);
+    flb_http_add_header(client, "client_id", 8, client_id, 36);
+
+    ret = flb_http_do(client, &b_sent);
+    if (ret != 0 || client->resp.status != 200) {
+        flb_plg_debug(ctx->ins, "[flb_azure_imds_get_token] connection initialization error");
+        flb_plg_debug(ctx->ins, "[flb_azure_imds_get_token] HTTP response status: %d", client->resp.status);
+        flb_plg_debug(ctx->ins, "[flb_azure_imds_get_token] HTTP response payload: %.*s", (int)client->resp.payload_size, client->resp.payload);
+        flb_http_client_destroy(client);
+        flb_upstream_conn_release(u_conn);
+        flb_sds_destroy(url);
+        return NULL;
     }
 
-    ret = flb_oauth2_payload_append(ctx->o, "client_secret", 13, ctx->client_secret, -1);
-    if (ret == -1) {
-        flb_plg_error(ctx->ins, "error appending oauth2 params");
-        return -1;
+    flb_plg_debug(ctx->ins, "[flb_azure_imds_get_token] HTTP response status: %d", client->resp.status);
+    flb_plg_debug(ctx->ins, "[flb_azure_imds_get_token] HTTP response payload: %.*s", (int)client->resp.payload_size, client->resp.payload);
+
+    response = flb_sds_create_len(client->resp.payload, client->resp.payload_size);
+    flb_http_client_destroy(client);
+    flb_upstream_conn_release(u_conn);
+    flb_sds_destroy(url);
+
+    return response;
+}
+
+static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
+{
+    char *token = NULL;
+    int ret;
+    flb_sds_t response = NULL;
+    char *access_token = NULL;
+
+    flb_plg_debug(ctx->ins, "Starting token retrieval process");
+
+    /* Check if IMDS-based token retrieval is needed */
+    if (ctx->use_imds == FLB_TRUE) {
+        flb_plg_debug(ctx->ins, "Using IMDS for token retrieval");
+
+        response = flb_azure_imds_get_token(ctx, ctx->client_id);
+        if (!response) {
+            flb_plg_error(ctx->ins, "Failed to retrieve token from Azure IMDS");
+            return -1;
+        }
+
+        // Parse the JSON response to extract the access token
+        size_t access_token_len = 0;
+        char *p = strstr(response, "\"access_token\":\"");
+        if (p) {
+            p += strlen("\"access_token\":\"");
+            char *end = strstr(p, "\"");
+            if (end) {
+                access_token_len = end - p;
+                access_token = flb_malloc(access_token_len + 1);
+                if (access_token) {
+                    strncpy(access_token, p, access_token_len);
+                    access_token[access_token_len] = '\0';
+                }
+            }
+        }
+
+        flb_plg_debug(ctx->ins, "Access token extracted is %s", access_token);
+
+        if (!access_token) {
+            flb_plg_error(ctx->ins, "Error extracting access token from IMDS response");
+            flb_sds_destroy(response);
+            return -1;
+        }
+
+        ctx->o->access_token = flb_sds_create(access_token);
+        ctx->o->token_type = flb_sds_create("Bearer");
+        flb_free(access_token);
+
+        flb_sds_destroy(response);
+
+    } else {
+        /* Use client secret flow */
+        flb_plg_debug(ctx->ins, "Using client secret flow for token retrieval");
+
+        flb_oauth2_payload_clear(ctx->o);
+
+        ret = flb_oauth2_payload_append(ctx->o, "grant_type", 10, "client_credentials", 18);
+        if (ret == -1) {
+            flb_plg_error(ctx->ins, "Error appending oauth2 params: grant_type");
+            return -1;
+        }
+
+        ret = flb_oauth2_payload_append(ctx->o, "scope", 5, FLB_AZURE_KUSTO_SCOPE, 39);
+        if (ret == -1) {
+            flb_plg_error(ctx->ins, "Error appending oauth2 params: scope");
+            return -1;
+        }
+
+        ret = flb_oauth2_payload_append(ctx->o, "client_id", 9, ctx->client_id, -1);
+        if (ret == -1) {
+            flb_plg_error(ctx->ins, "Error appending oauth2 params: client_id");
+            return -1;
+        }
+
+        ret = flb_oauth2_payload_append(ctx->o, "client_secret", 13, ctx->client_secret, -1);
+        if (ret == -1) {
+            flb_plg_error(ctx->ins, "Error appending oauth2 params: client_secret");
+            return -1;
+        }
+
+        flb_plg_debug(ctx->ins, "Requesting oauth2 token");
+        token = flb_oauth2_token_get(ctx->o);
+        if (!token) {
+            flb_plg_error(ctx->ins, "Error retrieving oauth2 access token");
+            return -1;
+        }
     }
 
-    /* Retrieve access token */
-    token = flb_oauth2_token_get(ctx->o);
-    if (!token) {
-        flb_plg_error(ctx->ins, "error retrieving oauth2 access token");
-        return -1;
-    }
-
+    flb_plg_debug(ctx->ins, "OAuth2 token retrieval process completed successfully");
     return 0;
 }
+
 
 flb_sds_t get_azure_kusto_token(struct flb_azure_kusto *ctx)
 {
@@ -92,6 +197,9 @@ flb_sds_t get_azure_kusto_token(struct flb_azure_kusto *ctx)
     if (flb_oauth2_token_expired(ctx->o) == FLB_TRUE) {
         ret = azure_kusto_get_oauth2_token(ctx);
     }
+
+    flb_plg_debug(ctx->ins, "oauth token type is %s", ctx->o->token_type);
+    flb_plg_debug(ctx->ins, "oauth token is %s", ctx->o->access_token);
 
     /* Copy string to prevent race conditions (get_oauth2 can free the string) */
     if (ret == 0) {
@@ -184,6 +292,7 @@ flb_sds_t execute_ingest_csl_command(struct flb_azure_kusto *ctx, const char *cs
                             ctx->ins,
                             "Kusto ingestion command request http_do=%i, HTTP Status: %i",
                             ret, c->resp.status);
+                    flb_plg_debug(ctx->ins, "Kusto ingestion command HTTP request payload: %.*s", (int)c->resp.payload_size, c->resp.payload);
 
                     if (ret == 0) {
                         if (c->resp.status == 200) {
@@ -787,6 +896,17 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
     flb_plg_debug(ctx->ins, "async flag is %d", flb_stream_is_async(&ctx->u->base));
 
     /* Create oauth2 context */
+    if(ctx->use_imds == FLB_TRUE){
+        ctx->imds_upstream =
+                flb_upstream_create(config, "169.254.169.254", 80, FLB_IO_TCP, NULL);
+        if (!ctx->imds_upstream) {
+            flb_plg_error(ctx->ins, "cannot create imds upstream");
+            return -1;
+        }
+        if (ctx->buffering_enabled ==  FLB_TRUE){
+            flb_stream_disable_flags(&ctx->imds_upstream->base, FLB_IO_ASYNC);
+        }
+    }
     ctx->o =
             flb_oauth2_create(ctx->config, ctx->oauth_url, FLB_AZURE_KUSTO_TOKEN_REFRESH);
     if (!ctx->o) {
@@ -1310,6 +1430,11 @@ static int cb_azure_kusto_exit(void *data, struct flb_config *config)
         ctx->u = NULL;
     }
 
+    if (ctx->imds_upstream) {
+        flb_upstream_destroy(ctx->imds_upstream);
+        ctx->imds_upstream = NULL;
+    }
+
 
     // Destroy the mutexes
     pthread_mutex_destroy(&ctx->resources_mutex);
@@ -1413,6 +1538,10 @@ static struct flb_config_map config_map[] = {
         {FLB_CONFIG_MAP_INT, "scheduler_max_retries", "3",0, FLB_TRUE,
          offsetof(struct flb_azure_kusto, scheduler_max_retries),
         "Set the maximum number of retries for ingestion using the scheduler. Default is 3"
+        },
+        {FLB_CONFIG_MAP_BOOL, "use_imds", "false",0, FLB_TRUE,
+                offsetof(struct flb_azure_kusto, use_imds),
+        "Whether to use IMDS to retrieve oauth token. Default is false"
         },
         /* EOF */
         {0}};
