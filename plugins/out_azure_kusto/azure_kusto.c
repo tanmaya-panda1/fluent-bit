@@ -776,11 +776,12 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
     if(ctx->use_imds == FLB_TRUE){
         ctx->imds_upstream =
                 flb_upstream_create(config, "169.254.169.254", 80, FLB_IO_TCP, NULL);
-        flb_stream_disable_flags(&ctx->imds_upstream->base, FLB_IO_ASYNC);
-
         if (!ctx->imds_upstream) {
-            flb_free(ctx);
+            flb_plg_error(ctx->ins, "cannot create imds upstream");
             return -1;
+        }
+        if (ctx->buffering_enabled ==  FLB_TRUE){
+            flb_stream_disable_flags(&ctx->imds_upstream->base, FLB_IO_ASYNC);
         }
     }
     ctx->o =

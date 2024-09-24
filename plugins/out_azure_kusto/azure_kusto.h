@@ -43,8 +43,6 @@
 #define FLB_MSAL_AUTH_URL_TEMPLATE \
     "https://login.microsoftonline.com/%s/oauth2/v2.0/token"
 
-/* MSAL authorization URL  */
-
 #define FLB_AZURE_KUSTO_MGMT_URI_PATH "/v1/rest/mgmt"
 #define FLB_AZURE_KUSTO_MGMT_BODY_TEMPLATE "{\"csl\":\"%s\", \"db\": \"NetDefaultDB\"}"
 
