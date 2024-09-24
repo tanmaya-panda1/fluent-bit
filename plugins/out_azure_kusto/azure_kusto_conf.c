@@ -664,11 +664,11 @@ struct flb_azure_kusto *flb_azure_kusto_conf_create(struct flb_output_instance *
     }
 
     /* config: 'client_secret' */
-    /*if (ctx->client_secret == NULL) {
+    if (ctx->use_imds == FLB_FALSE && ctx->client_secret == NULL) {
         flb_plg_error(ctx->ins, "property 'client_secret' is not defined");
         flb_azure_kusto_conf_destroy(ctx);
         return NULL;
-    }*/
+    }
 
     /* config: 'ingestion_endpoint' */
     if (ctx->ingestion_endpoint == NULL) {
@@ -702,17 +702,6 @@ struct flb_azure_kusto *flb_azure_kusto_conf_create(struct flb_output_instance *
     flb_sds_snprintf(&ctx->oauth_url, flb_sds_alloc(ctx->oauth_url),
                      FLB_MSAL_AUTH_URL_TEMPLATE, ctx->tenant_id);
 
-
-    /* Create the imds URL */
-    ctx->imds_url = flb_sds_create_size(sizeof(FLB_IMDS_URL_TEMPLATE) - 1 +
-                                         flb_sds_len(ctx->tenant_id));
-    if (!ctx->imds_url) {
-        flb_errno();
-        flb_azure_kusto_conf_destroy(ctx);
-        return NULL;
-    }
-    flb_sds_snprintf(&ctx->imds_url, flb_sds_alloc(ctx->imds_url),
-                     FLB_IMDS_URL_TEMPLATE);
 
     ctx->resources = flb_calloc(1, sizeof(struct flb_azure_kusto_resources));
     if (!ctx->resources) {
