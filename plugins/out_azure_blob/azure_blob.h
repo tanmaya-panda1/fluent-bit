@@ -67,6 +67,7 @@ struct flb_azure_blob {
 
     int buffering_enabled;
     flb_sds_t buffer_dir;
+    int unify_tag;
 
     size_t file_size;
     time_t upload_timeout;
@@ -77,7 +78,6 @@ struct flb_azure_blob {
     flb_sds_t azure_blob_buffer_key;
     size_t store_dir_limit_size;
     int buffer_file_delete_early;
-    int rewrite_tag;
     int blob_uri_length;
 
     int has_old_buffers;

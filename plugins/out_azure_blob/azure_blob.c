@@ -918,22 +918,29 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
     char *final_payload = NULL;
     size_t final_payload_size = 0;
 
-    flb_plg_trace(ctx->ins, "flushing bytes for event tag %s and size %zu", event_chunk->tag, event_chunk->size);
+    flb_sds_t tag_name = NULL;
 
-    tag_len = flb_sds_len(event_chunk->tag);
+    flb_plg_trace(ctx->ins, "flushing bytes for event tag %s and size %zu", event_chunk->tag, event_chunk->size);
 
     if (ctx->buffering_enabled == FLB_TRUE) {
 
+        if (ctx->unify_tag == FLB_TRUE){
+            tag_name = flb_sds_create("fluentbit-buffer-file-unify-tag.log");
+        }else {
+            tag_name = event_chunk->tag;
+        }
+        tag_len = flb_sds_len(tag_name);
+
         flush_init(ctx,config);
         /* Reformat msgpack to JSON payload */
-        ret = azure_blob_format(config, i_ins, ctx, NULL, FLB_EVENT_TYPE_LOGS, event_chunk->tag, tag_len, event_chunk->data, event_chunk->size, (void **)&json, &json_size);
+        ret = azure_blob_format(config, i_ins, ctx, NULL, FLB_EVENT_TYPE_LOGS, tag_name, tag_len, event_chunk->data, event_chunk->size, (void **)&json, &json_size);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "cannot reformat data into json");
             goto error;
         }
 
         /* Get a file candidate matching the given 'tag' */
-        upload_file = azure_blob_store_file_get(ctx, event_chunk->tag, tag_len);
+        upload_file = azure_blob_store_file_get(ctx, tag_name, tag_len);
 
         /* Discard upload_file if it has failed to upload MAX_UPLOAD_ERRORS times */
         if (upload_file != NULL && upload_file->failures >= MAX_UPLOAD_ERRORS) {
@@ -973,12 +980,12 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
             }
 
             /* Upload the file */
-            ret = send_blob(config, i_ins, ctx, (char *)event_chunk->tag, (char *)event_chunk->tag, tag_len, final_payload, final_payload_size);
+            ret = send_blob(config, i_ins, ctx, (char *)tag_name, (char *)tag_name, tag_len, final_payload, final_payload_size);
 
             if (ret == CREATE_BLOB) {
                 ret = create_blob(ctx, upload_file->fsf->name);
                 if (ret == FLB_OK) {
-                    ret = send_blob(config, i_ins, ctx, (char *)event_chunk->tag, (char *)event_chunk->tag, tag_len, final_payload, final_payload_size);
+                    ret = send_blob(config, i_ins, ctx, (char *)tag_name, (char *)tag_name, tag_len, final_payload, final_payload_size);
                 }
             }
 
@@ -992,7 +999,7 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
             }
         } else {
             /* Buffer current chunk in filesystem and wait for next chunk from engine */
-            ret = azure_blob_store_buffer_put(ctx, upload_file, event_chunk->tag, tag_len, json, json_size);
+            ret = azure_blob_store_buffer_put(ctx, upload_file, tag_name, tag_len, json, json_size);
             if (ret == 0) {
                 flb_plg_debug(ctx->ins, "buffered chunk %s", event_chunk->tag);
                 goto cleanup;
@@ -1037,6 +1044,9 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
     if (json) {
         flb_sds_destroy(json);
     }
+    if (tag_name){
+        flb_sds_destroy(tag_name);
+    }
     if (final_payload) {
         flb_free(final_payload); // Ensure final_payload is freed
     }
@@ -1045,6 +1055,9 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
     error:
     if (json) {
         flb_sds_destroy(json);
+    }
+    if (tag_name){
+        flb_sds_destroy(tag_name);
     }
     if (final_payload) {
         flb_free(final_payload); // Ensure final_payload is freed in error path
@@ -1188,13 +1201,13 @@ static struct flb_config_map config_map[] = {
             offsetof(struct flb_azure_blob, buffer_file_delete_early),
     "Whether to delete the buffered file early after successful blob creation. Default is false"
     },
-    {FLB_CONFIG_MAP_BOOL, "rewrite_tag", "false",0, FLB_TRUE,
-            offsetof(struct flb_azure_blob, rewrite_tag),
-    "Whether to delete the buffered file early after successful blob creation. Default is false"
-    },
     {FLB_CONFIG_MAP_INT, "blob_uri_length", "64",0, FLB_TRUE,
             offsetof(struct flb_azure_blob, blob_uri_length),
     "Set the length of generated blob uri before ingesting to Azure Kusto. Default is 64"
+    },
+    {FLB_CONFIG_MAP_BOOL, "unify_tag", "false",0, FLB_TRUE,
+            offsetof(struct flb_azure_blob, unify_tag),
+    "Whether to create a single buffer file when buffering mode is enabled. Default is false"
     },
     /* EOF */
     {0}
