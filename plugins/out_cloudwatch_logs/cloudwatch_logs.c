@@ -51,10 +51,9 @@ static struct flb_aws_header content_type_header = {
 };
 
 static int validate_log_group_class(struct flb_cloudwatch *ctx)
-{   
+{
     if (ctx->create_group == FLB_FALSE) {
-        flb_plg_error(ctx->ins, "Configuring log_group_class requires `auto_create_group On`.");
-        return -1;
+        return 0;
     }
 
     if (ctx->log_group_class == NULL || strlen(ctx->log_group_class) == 0) {
@@ -279,7 +278,7 @@ static int cb_cloudwatch_init(struct flb_output_instance *ins,
                                                            (char *) ctx->sts_endpoint,
                                                            NULL,
                                                            flb_aws_client_generator(),
-                                                           ctx->profile);
+                                                           (char *) ctx->profile);
     if (!ctx->aws_provider) {
         flb_plg_error(ctx->ins, "Failed to create AWS Credential Provider");
         goto error;

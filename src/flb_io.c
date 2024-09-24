@@ -109,6 +109,7 @@ int flb_io_net_connect(struct flb_connection *connection,
     int ret;
     int async = FLB_FALSE;
     flb_sockfd_t fd = -1;
+    int flags = flb_connection_get_flags(connection);
     // struct flb_upstream *u = u_conn->u;
 
     if (connection->fd > 0) {
@@ -119,7 +120,7 @@ int flb_io_net_connect(struct flb_connection *connection,
     }
 
     /* Check which connection mode must be done */
-    if (coro) {
+    if (coro && (flags & FLB_IO_ASYNC)) {
         async = flb_upstream_is_async(connection->upstream);
     }
     else {
@@ -356,11 +357,11 @@ retry:
 
 #ifdef FLB_HAVE_TRACE
     if (bytes > 0) {
-        flb_trace("[io coro=%p] [fd %i] write_async(2)=%d (%lu/%lu)",
+        flb_trace("[io coro=%p] [fd %i] write_async(2)=%zd (%lu/%lu)",
                   co, connection->fd, bytes, total + bytes, len);
     }
     else {
-        flb_trace("[io coro=%p] [fd %i] write_async(2)=%d (%lu/%lu)",
+        flb_trace("[io coro=%p] [fd %i] write_async(2)=%zd (%lu/%lu)",
                   co, connection->fd, bytes, total, len);
     }
 #endif

@@ -467,13 +467,11 @@ static int extract_msgpack_obj_from_msgpack_map(msgpack_object_map *root,
 static flb_sds_t get_str_value_from_msgpack_map(msgpack_object_map map,
                                                 const char *key, int key_size)
 {
-    int i;
     int ret;
-    msgpack_object k;
     msgpack_object v;
     flb_sds_t ptr = NULL;
 
-//  convert msgpack_object_map to msgpack_object
+    /* convert msgpack_object_map to msgpack_object */
     ret = extract_msgpack_obj_from_msgpack_map(&map, (char*) key, key_size,
                                                MSGPACK_OBJECT_STR, &v);
     if (ret == 0) {
@@ -1725,7 +1723,7 @@ static flb_sds_t stackdriver_format(struct flb_stackdriver *ctx,
 
     /* Parameters for trace */
     int trace_extracted = FLB_FALSE;
-    flb_sds_t trace;
+    flb_sds_t trace = NULL;
     char stackdriver_trace[PATH_MAX];
     const char *new_trace;
 
@@ -2306,9 +2304,22 @@ static flb_sds_t stackdriver_format(struct flb_stackdriver *ctx,
             insert_id_extracted = FLB_FALSE;
         }
         else {
+            if (trace_extracted == FLB_TRUE) {
+                flb_sds_destroy(trace);
+            }
+
+            if (span_id_extracted == FLB_TRUE) {
+                flb_sds_destroy(span_id);
+            }
+
+            if (project_id_extracted == FLB_TRUE) {
+                flb_sds_destroy(project_id_key);
+            }
+
             if (log_name_extracted == FLB_TRUE) {
                 flb_sds_destroy(log_name);
             }
+
             continue;
         }
 
@@ -2359,8 +2370,28 @@ static flb_sds_t stackdriver_format(struct flb_stackdriver *ctx,
             flb_plg_error(ctx->ins, "the type of payload labels should be map");
             flb_sds_destroy(operation_id);
             flb_sds_destroy(operation_producer);
+            flb_sds_destroy(source_location_file);
+            flb_sds_destroy(source_location_function);
+
+            if (trace_extracted == FLB_TRUE) {
+                flb_sds_destroy(trace);
+            }
+
+            if (span_id_extracted == FLB_TRUE) {
+                flb_sds_destroy(span_id);
+            }
+
+            if (project_id_extracted == FLB_TRUE) {
+                flb_sds_destroy(project_id_key);
+            }
+
+            if (log_name_extracted == FLB_TRUE) {
+                flb_sds_destroy(log_name);
+            }
+
             flb_log_event_decoder_destroy(&log_decoder);
             msgpack_sbuffer_destroy(&mp_sbuf);
+
             return NULL;
         }
 
@@ -2675,8 +2706,13 @@ static int parse_partial_success_response(struct flb_http_client* c,
     msgpack_unpacked_init(&result);
     ret = msgpack_unpack_next(&result, buffer, size, &off);
     if (ret != MSGPACK_UNPACK_SUCCESS) {
-        flb_plg_error(ctx->ins, "Cannot unpack %s response: %s",
-                      c->resp.payload);
+        if (c->resp.payload_size > 0) {
+            flb_plg_error(ctx->ins, "Cannot unpack response: %s",
+                          c->resp.payload);
+        }
+        else {
+            flb_plg_error(ctx->ins, "Cannot unpack response");
+        }
         flb_free(buffer);
         msgpack_unpacked_destroy(&result);
         return -1;
@@ -2684,7 +2720,7 @@ static int parse_partial_success_response(struct flb_http_client* c,
 
     root = result.data;
     if (root.type != MSGPACK_OBJECT_MAP) {
-        flb_plg_error(ctx->ins, "%s response parsing failed, msgpack_type=%i",
+        flb_plg_error(ctx->ins, "response parsing failed, msgpack_type=%i",
                       root.type);
         flb_free(buffer);
         msgpack_unpacked_destroy(&result);
@@ -2717,8 +2753,7 @@ static int parse_partial_success_response(struct flb_http_client* c,
     ret = extract_msgpack_obj_from_msgpack_map(&root.via.map, "error", 5,
                                                MSGPACK_OBJECT_MAP, &error_map);
     if (ret == -1) {
-        flb_plg_debug(ctx->ins,
-                      "%s response does not have key: \"error\"");
+        flb_plg_debug(ctx->ins, "response does not have key: \"error\"");
         flb_free(buffer);
         msgpack_unpacked_destroy(&result);
         return -1;
@@ -2728,8 +2763,7 @@ static int parse_partial_success_response(struct flb_http_client* c,
                                                MSGPACK_OBJECT_ARRAY,
                                                &details_arr);
     if (ret == -1) {
-        flb_plg_debug(ctx->ins,
-                      "%s response does not have key: \"details\"");
+        flb_plg_debug(ctx->ins, "response does not have key: \"details\"");
         flb_free(buffer);
         msgpack_unpacked_destroy(&result);
         return -1;
@@ -2769,7 +2803,7 @@ static int parse_partial_success_response(struct flb_http_client* c,
             }
             log_entry_ret = extract_msgpack_obj_from_msgpack_map(
                 &logEntryErrors_map.via.map,
-                logEntryError_key.via.str.ptr,
+                (char *) logEntryError_key.via.str.ptr,
                 logEntryError_key.via.str.size,
                 MSGPACK_OBJECT_MAP,
                 &logEntryError_map);
@@ -2828,6 +2862,9 @@ static void cb_stackdriver_flush(struct flb_event_chunk *event_chunk,
     struct flb_connection *u_conn;
     struct flb_http_client *c;
     int compressed = FLB_FALSE;
+    uint64_t write_entries_start = 0;
+    uint64_t write_entries_end = 0;
+    float write_entries_latency = 0.0;
 #ifdef FLB_HAVE_METRICS
     char *name = (char *) flb_output_name(ctx->ins);
     uint64_t ts = cfl_time_now();
@@ -2922,8 +2959,13 @@ static void cb_stackdriver_flush(struct flb_event_chunk *event_chunk,
         flb_http_set_content_encoding_gzip(c);
     }
 
+    write_entries_start = cfl_time_now();
+
     /* Send HTTP request */
     ret = flb_http_do(c, &b_sent);
+
+    write_entries_end = cfl_time_now();
+    write_entries_latency = (float)(write_entries_end - write_entries_start) / 1000000000.0;
 
     /* validate response */
     if (ret != 0) {
@@ -2993,6 +3035,9 @@ static void cb_stackdriver_flush(struct flb_event_chunk *event_chunk,
 #ifdef FLB_HAVE_METRICS
     if (ret_code == FLB_OK) {
         cmt_counter_inc(ctx->cmt_successful_requests, ts, 1, (char *[]) {name});
+        if (write_entries_latency > 0.0) {
+          cmt_histogram_observe(ctx->cmt_write_entries_latency, ts, write_entries_latency, 1, (char *[]) {name});
+        }
         add_record_metrics(ctx, ts, (int) event_chunk->total_events, 200, 0);
 
         /* OLD api */

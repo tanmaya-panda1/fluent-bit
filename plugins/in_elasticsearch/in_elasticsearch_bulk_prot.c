@@ -224,7 +224,7 @@ static int send_response(struct in_elasticsearch_bulk_conn *conn, int http_statu
     }
     else if (http_status == 400) {
         flb_sds_printf(&out,
-                       "HTTP/1.1 400 Forbidden\r\n"
+                       "HTTP/1.1 400 Bad Request\r\n"
                        "Server: Fluent Bit v%s\r\n"
                        "Content-Length: %i\r\n\r\n%s",
                        FLB_VERSION_STR,
@@ -418,9 +418,9 @@ static int process_ndpack(struct flb_in_elasticsearch *ctx, flb_sds_t tag, char 
                 }
 
                 if (error_op == FLB_FALSE) {
-                    flb_log_event_encoder_reset(&ctx->log_encoder);
+                    flb_log_event_encoder_reset(ctx->log_encoder);
 
-                    ret = flb_log_event_encoder_begin_record(&ctx->log_encoder);
+                    ret = flb_log_event_encoder_begin_record(ctx->log_encoder);
 
                     if (ret != FLB_EVENT_ENCODER_SUCCESS) {
                         flb_sds_destroy(write_op);
@@ -431,7 +431,7 @@ static int process_ndpack(struct flb_in_elasticsearch *ctx, flb_sds_t tag, char 
                     }
 
                     ret = flb_log_event_encoder_set_timestamp(
-                            &ctx->log_encoder,
+                            ctx->log_encoder,
                             &tm);
 
                     if (ret != FLB_EVENT_ENCODER_SUCCESS) {
@@ -444,7 +444,7 @@ static int process_ndpack(struct flb_in_elasticsearch *ctx, flb_sds_t tag, char 
 
                     if (ret == FLB_EVENT_ENCODER_SUCCESS) {
                         ret = flb_log_event_encoder_append_body_values(
-                                &ctx->log_encoder,
+                                ctx->log_encoder,
                                 FLB_LOG_EVENT_CSTRING_VALUE((char *) ctx->meta_key),
                                 FLB_LOG_EVENT_MSGPACK_OBJECT_VALUE(&result.data));
                     }
@@ -469,7 +469,7 @@ static int process_ndpack(struct flb_in_elasticsearch *ctx, flb_sds_t tag, char 
                         map_copy_entry = &result.data.via.map.ptr[map_copy_index];
 
                         ret = flb_log_event_encoder_append_body_values(
-                                &ctx->log_encoder,
+                                ctx->log_encoder,
                                 FLB_LOG_EVENT_MSGPACK_OBJECT_VALUE(&map_copy_entry->key),
                                 FLB_LOG_EVENT_MSGPACK_OBJECT_VALUE(&map_copy_entry->val));
                     }
@@ -481,7 +481,7 @@ static int process_ndpack(struct flb_in_elasticsearch *ctx, flb_sds_t tag, char 
                         break;
                     }
 
-                    ret = flb_log_event_encoder_commit_record(&ctx->log_encoder);
+                    ret = flb_log_event_encoder_commit_record(ctx->log_encoder);
 
                     if (ret != FLB_EVENT_ENCODER_SUCCESS) {
                         flb_plg_error(ctx->ins, "event encoder error : %d", ret);
@@ -501,8 +501,8 @@ static int process_ndpack(struct flb_in_elasticsearch *ctx, flb_sds_t tag, char 
                         flb_input_log_append(ctx->ins,
                                              tag_from_record,
                                              flb_sds_len(tag_from_record),
-                                             ctx->log_encoder.output_buffer,
-                                             ctx->log_encoder.output_length);
+                                             ctx->log_encoder->output_buffer,
+                                             ctx->log_encoder->output_length);
 
                         flb_sds_destroy(tag_from_record);
                     }
@@ -510,17 +510,17 @@ static int process_ndpack(struct flb_in_elasticsearch *ctx, flb_sds_t tag, char 
                         flb_input_log_append(ctx->ins,
                                              tag,
                                              flb_sds_len(tag),
-                                             ctx->log_encoder.output_buffer,
-                                             ctx->log_encoder.output_length);
+                                             ctx->log_encoder->output_buffer,
+                                             ctx->log_encoder->output_length);
                     }
                     else {
                         /* use default plugin Tag (it internal name, e.g: http.0 */
                         flb_input_log_append(ctx->ins, NULL, 0,
-                                             ctx->log_encoder.output_buffer,
-                                             ctx->log_encoder.output_length);
+                                             ctx->log_encoder->output_buffer,
+                                             ctx->log_encoder->output_length);
                     }
 
-                    flb_log_event_encoder_reset(&ctx->log_encoder);
+                    flb_log_event_encoder_reset(ctx->log_encoder);
                 }
                 if (op_ret) {
                     if (flb_sds_cmp(write_op, "index", op_str_size) == 0) {
@@ -750,6 +750,7 @@ int in_elasticsearch_bulk_prot_handle(struct flb_in_elasticsearch *ctx,
     if (ctx->ins->tag && !ctx->ins->tag_default) {
         tag = flb_sds_create(ctx->ins->tag);
         if (tag == NULL) {
+            mk_mem_free(uri);
             return -1;
         }
     }
@@ -893,13 +894,13 @@ int in_elasticsearch_bulk_prot_handle(struct flb_in_elasticsearch *ctx,
     }
     error_str = strstr(bulk_statuses, "\"status\":40");
     if (error_str){
-        flb_sds_cat(bulk_response, "{\"errors\":true,\"items\":[", 24);
+        flb_sds_cat_safe(&bulk_response, "{\"errors\":true,\"items\":[", 24);
     }
     else {
-        flb_sds_cat(bulk_response, "{\"errors\":false,\"items\":[", 25);
+        flb_sds_cat_safe(&bulk_response, "{\"errors\":false,\"items\":[", 25);
     }
-    flb_sds_cat(bulk_response, bulk_statuses, flb_sds_len(bulk_statuses));
-    flb_sds_cat(bulk_response, "]}", 2);
+    flb_sds_cat_safe(&bulk_response, bulk_statuses, flb_sds_len(bulk_statuses));
+    flb_sds_cat_safe(&bulk_response, "]}", 2);
     send_response(conn, 200, bulk_response);
 
     mk_mem_free(uri);
@@ -925,8 +926,8 @@ int in_elasticsearch_bulk_prot_handle_error(struct flb_in_elasticsearch *ctx,
 
 
 /* New gen HTTP server */
-static int send_response_ng(struct flb_http_response *response, 
-                            int http_status, 
+static int send_response_ng(struct flb_http_response *response,
+                            int http_status,
                             char *content_type,
                             char *message)
 {
@@ -942,18 +943,18 @@ static int send_response_ng(struct flb_http_response *response,
         flb_http_response_set_message(response, "No Content");
     }
     else if (http_status == 400) {
-        flb_http_response_set_message(response, "Forbidden");
+        flb_http_response_set_message(response, "Bad Request");
     }
 
     if (content_type != NULL) {
-        flb_http_response_set_header(response, 
+        flb_http_response_set_header(response,
                                      "content-type", 0,
                                      content_type, 0);
     }
 
     if (message != NULL) {
-        flb_http_response_set_body(response, 
-                                   (unsigned char *) message, 
+        flb_http_response_set_body(response,
+                                   (unsigned char *) message,
                                    strlen(message));
     }
 
@@ -962,14 +963,14 @@ static int send_response_ng(struct flb_http_response *response,
     return 0;
 }
 
-static int send_json_response_ng(struct flb_http_response *response, 
+static int send_json_response_ng(struct flb_http_response *response,
                                  int http_status,
                                  char *message)
 {
-    return send_response_ng(response, http_status, "application/json", message); 
+    return send_response_ng(response, http_status, "application/json", message);
 }
 
-static int send_version_message_response_ng(struct flb_http_response *response, 
+static int send_version_message_response_ng(struct flb_http_response *response,
                                             struct flb_in_elasticsearch *ctx,
                                             int http_status)
 {
@@ -989,14 +990,14 @@ static int send_version_message_response_ng(struct flb_http_response *response,
                    ES_VERSION_RESPONSE_TEMPLATE,
                    ctx->es_version);
 
-    send_json_response_ng(response, http_status, message); 
+    send_json_response_ng(response, http_status, message);
 
     cfl_sds_destroy(message);
 
     return 0;
 }
 
-static int send_dummy_sniffer_response_ng(struct flb_http_response *response, 
+static int send_dummy_sniffer_response_ng(struct flb_http_response *response,
                                           struct flb_in_elasticsearch *ctx,
                                           int http_status)
 {
@@ -1024,7 +1025,7 @@ static int send_dummy_sniffer_response_ng(struct flb_http_response *response,
                    ctx->cluster_name, ctx->node_name,
                    hostname, ctx->tcp_port, ctx->buffer_max_size);
 
-    send_json_response_ng(response, http_status, resp); 
+    send_json_response_ng(response, http_status, resp);
 
     flb_sds_destroy(resp);
 
@@ -1081,7 +1082,7 @@ int in_elasticsearch_bulk_prot_handle_ng(struct flb_http_request *request,
     }
 
     /* HTTP/1.1 needs Host header */
-    if (request->protocol_version == HTTP_PROTOCOL_HTTP1 && 
+    if (request->protocol_version == HTTP_PROTOCOL_HTTP1 &&
         request->host == NULL) {
 
         return -1;
@@ -1113,7 +1114,7 @@ int in_elasticsearch_bulk_prot_handle_ng(struct flb_http_request *request,
     else if (request->method == HTTP_METHOD_POST) {
         if (strcmp(request->path, "/_bulk") == 0) {
             bulk_statuses = flb_sds_create_size(context->buffer_max_size);
-            
+
             if (bulk_statuses == NULL) {
                 return -1;
             }
@@ -1159,7 +1160,7 @@ int in_elasticsearch_bulk_prot_handle_ng(struct flb_http_request *request,
 
             flb_sds_destroy(bulk_statuses);
             flb_sds_destroy(bulk_response);
-                        
+
         } else {
             send_response_ng(response, 400, NULL, "error: invalid HTTP endpoint\n");
 
@@ -1171,6 +1172,6 @@ int in_elasticsearch_bulk_prot_handle_ng(struct flb_http_request *request,
 
         return -1;
     }
-    
+
     return 0;
 }

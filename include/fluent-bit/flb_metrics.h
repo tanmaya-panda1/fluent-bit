@@ -39,6 +39,7 @@
 #include <cmetrics/cmt_encode_msgpack.h>
 #include <cmetrics/cmt_encode_splunk_hec.h>
 #include <cmetrics/cmt_encode_cloudwatch_emf.h>
+#include <cmetrics/cmt_decode_statsd.h>
 #include <cmetrics/cmt_filter.h>
 
 /* Metrics IDs for general purpose (used by core and Plugins */
@@ -61,16 +62,14 @@
 
 struct flb_metric {
     int id;
-    int title_len;
-    char *title;
+    flb_sds_t title;
     size_t val;
     struct mk_list _head;
 };
 
 struct flb_metrics {
-    int title_len;         /* Title string length */
-    char *title;           /* Title or id for this metrics context */
     int count;             /* Total count of metrics registered */
+    flb_sds_t title;
     struct mk_list list;   /* Head of metrics list */
 };
 

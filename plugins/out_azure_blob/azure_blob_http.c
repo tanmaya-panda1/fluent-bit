@@ -345,8 +345,8 @@ int azb_http_client_setup(struct flb_azure_blob *ctx, struct flb_http_client *c,
 
         auth = flb_sds_create_size(64 + flb_sds_len(can_req));
 
-        flb_sds_cat(auth, ctx->shared_key_prefix, flb_sds_len(ctx->shared_key_prefix));
-        flb_sds_cat(auth, can_req, flb_sds_len(can_req));
+        flb_sds_cat_safe(&auth, ctx->shared_key_prefix, flb_sds_len(ctx->shared_key_prefix));
+        flb_sds_cat_safe(&auth, can_req, flb_sds_len(can_req));
 
         /* Azure header: authorization */
         flb_http_add_header(c, "Authorization", 13, auth, flb_sds_len(auth));

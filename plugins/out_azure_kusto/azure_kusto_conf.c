@@ -70,7 +70,7 @@ static struct flb_upstream_node *flb_upstream_node_create_url(struct flb_azure_k
 
             if (ret != -1) {
                 ret = flb_hash_table_add(kv, AZURE_KUSTO_RESOURCE_UPSTREAM_SAS, 3, tmp + 1,
-                                         sas_length);
+                                   sas_length);
 
                 if (ret != -1) {
                     /* if any/all of these creations would fail the node creation will fail and cleanup */
@@ -78,9 +78,10 @@ static struct flb_upstream_node *flb_upstream_node_create_url(struct flb_azure_k
                     sds_port = flb_sds_create(port);
 
                     node = flb_upstream_node_create(
-                            NULL, sds_host, sds_port, FLB_TRUE, ctx->ins->tls->verify,
-                            ctx->ins->tls->debug, ctx->ins->tls->vhost, NULL, NULL, NULL,
-                            NULL, NULL, kv, config);
+                        NULL, sds_host, sds_port, FLB_TRUE, ctx->ins->tls->verify,
+                        ctx->ins->tls->verify_hostname,
+                        ctx->ins->tls->debug, ctx->ins->tls->vhost, NULL, NULL, NULL,
+                        NULL, NULL, kv, config);
 
                     if (!node) {
                         flb_plg_error(ctx->ins, "error creating resource upstream node");

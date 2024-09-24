@@ -7,7 +7,7 @@ set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
 
 # Fluent Bit Version
 set(FLB_VERSION_MAJOR  3)
-set(FLB_VERSION_MINOR  1)
+set(FLB_VERSION_MINOR  2)
 set(FLB_VERSION_PATCH  0)
 set(FLB_VERSION_STR "${FLB_VERSION_MAJOR}.${FLB_VERSION_MINOR}.${FLB_VERSION_PATCH}")
 
@@ -88,6 +88,7 @@ elseif(FLB_SYSTEM_FREEBSD)
   set(WAMR_DISABLE_STACK_HW_BOUND_CHECK 1)
 endif()
 
+INCLUDE(TestBigEndian)
 include(GNUInstallDirs)
 include(ExternalProject)
 include(cmake/FindJournald.cmake)
@@ -110,6 +111,8 @@ option(FLB_RELEASE             "Build with release mode (-O2 -g -DNDEBUG)"   No)
 set(FLB_IPO "ReleaseOnly" CACHE STRING "Build with interprocedural optimization")
 set_property(CACHE FLB_IPO PROPERTY STRINGS "On;Off;ReleaseOnly")
 option(FLB_SMALL               "Optimise for small size"       No)
+set(FLB_SECURITY "ReleaseOnly" CACHE STRING "Build with security optimizations")
+set_property(CACHE FLB_SECURITY PROPERTY STRINGS "On;Off;ReleaseOnly")
 option(FLB_COVERAGE            "Build with code-coverage"      No)
 option(FLB_JEMALLOC            "Build with Jemalloc support"   No)
 option(FLB_REGEX               "Build with Regex support"     Yes)
@@ -146,6 +149,7 @@ option(FLB_WINDOWS_DEFAULTS    "Build with predefined Windows settings"     Yes)
 option(FLB_WASM                "Build with WASM runtime support"            Yes)
 option(FLB_WAMRC               "Build with WASM AOT compiler executable"    No)
 option(FLB_WASM_STACK_PROTECT  "Build with WASM runtime with strong stack protector flags" No)
+option(FLB_ENFORCE_ALIGNMENT   "Enable limited platform specific aligned memory access" No)
 
 # Native Metrics Support (cmetrics)
 option(FLB_METRICS             "Enable metrics support"       Yes)
@@ -162,6 +166,22 @@ option(FLB_CONFIG_YAML         "Enable YAML config format"    Yes)
 # List of plugins available and defaults for each option
 include(cmake/plugins_options.cmake)
 
+
+# Event loop backend (advanced users only)
+# ----------------------------------------
+# The following options are for advanced users only, they are used to enable
+# specific event loop backends. By default, the build system will try to
+# detect the best backend for the current Operating System. If you want to
+# force a specific backend, you can use ONE of the following options.
+#
+# Note that these options will enable the proper option for Monkey library.
+option(FLB_EVENT_LOOP_EPOLL     "Enable epoll(2) event loop backend"  No)
+option(FLB_EVENT_LOOP_POLL      "Enable poll(2) event loop backend"   No)
+option(FLB_EVENT_LOOP_KQUEUE    "Enable kqueue(2) event loop backend" No)
+option(FLB_EVENT_LOOP_SELECT    "Enable select(2) event loop backend" No)
+option(FLB_EVENT_LOOP_LIBEVENT  "Enable libevent event loop backend"  No)
+
+
 if(DEFINED FLB_NIGHTLY_BUILD AND NOT "${FLB_NIGHTLY_BUILD}" STREQUAL "")
   FLB_DEFINITION_VAL(FLB_NIGHTLY_BUILD ${FLB_NIGHTLY_BUILD})
 endif()
@@ -175,6 +195,10 @@ option(FLB_HTTP_CLIENT_DEBUG  "Enable HTTP Client debug callbacks"   No)
 
 # Run ldconfig on package post-install
 option(FLB_RUN_LDCONFIG "Enable execution of ldconfig after installation" No)
+
+# Prefer system libraries if available
+option(FLB_PREFER_SYSTEM_LIBS             "Prefer system libraries"                   No)
+option(FLB_PREFER_SYSTEM_LIB_LUAJIT       "Prefer the libluajit system library"       ${FLB_PREFER_SYSTEM_LIBS})
 
 # Enable all features
 if(FLB_ALL)
@@ -283,7 +307,7 @@ endif ()
 find_package(Git)
 # If we do not have Git or this is not a Git repo or another error this just is ignored and we have no output at runtime.
 execute_process(COMMAND
-  "${GIT_EXECUTABLE}" log -1 --format=%H
+  "${GIT_EXECUTABLE}" -c log.showSignature=false log -1 --format=%H
   WORKING_DIRECTORY "${FLB_ROOT}"
   OUTPUT_VARIABLE FLB_GIT_HASH
   ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -329,6 +353,26 @@ if(FLB_IPO STREQUAL "On" OR (FLB_IPO STREQUAL "ReleaseOnly" AND FLB_RELEASE))
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
   else()
     message(Warning "IPO is not supported on this platform")
+  endif()
+endif()
+
+# Memory alignment enforcement
+if(FLB_ENFORCE_ALIGNMENT)
+  FLB_DEFINITION(FLB_ENFORCE_ALIGNMENT)
+endif()
+
+# Harden release binary against security vulnerabilities
+if(FLB_SECURITY STREQUAL "On" OR (FLB_SECURITY STREQUAL "ReleaseOnly" AND FLB_RELEASE))
+  if (NOT MSVC)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,-z,relro,-z,now")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,-z,noexecstack")
+    if(NOT FLB_SMALL)
+      set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fstack-protector")
+      # Fortify requires optimization
+      if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D_FORTIFY_SOURCE=1")
+      endif()
+    endif()
   endif()
 endif()
 
@@ -474,12 +518,38 @@ if(FLB_TESTS_RUNTIME)
   FLB_OPTION(FLB_HTTP_SERVER  ON)
 endif()
 
-# MK Core
+# Monkey Core Library
 macro(MK_SET_OPTION option value)
   set(${option} ${value} CACHE INTERNAL "" FORCE)
 endmacro()
-MK_SET_OPTION(MK_SYSTEM_MALLOC  ON)
-MK_SET_OPTION(MK_DEBUG          ON)
+MK_SET_OPTION(MK_SYSTEM_MALLOC    ON)
+MK_SET_OPTION(MK_DEBUG            ON)
+
+# Monkey backend event loop
+if (FLB_EVENT_LOOP_EPOLL)
+  MK_SET_OPTION(MK_EVENT_LOOP_EPOLL ON)
+  FLB_DEFINITION(FLB_EVENT_LOOP_EPOLL)
+  message(STATUS "FLB Event loop backend > epoll(2)")
+elseif (FLB_EVENT_LOOP_POLL)
+  MK_SET_OPTION(MK_EVENT_LOOP_POLL ON)
+  FLB_DEFINITION(FLB_EVENT_LOOP_POLL)
+  message(STATUS "FLB Event loop backend > poll(2)")
+elseif (FLB_EVENT_LOOP_KQUEUE)
+  MK_SET_OPTION(MK_EVENT_LOOP_KQUEUE ON)
+  FLB_DEFINITION(FLB_EVENT_LOOP_KQUEUE)
+  message(STATUS "FLB Event loop backend > kqueue(2)")
+elseif (FLB_EVENT_LOOP_SELECT)
+  MK_SET_OPTION(MK_EVENT_LOOP_SELECT ON)
+  FLB_DEFINITION(FLB_EVENT_LOOP_SELECT)
+  message(STATUS "FLB Event loop backend > select(2)")
+elseif (FLB_EVENT_LOOP_LIBEVENT)
+  MK_SET_OPTION(MK_EVENT_LOOP_LIBEVENT ON)
+  FLB_DEFINITION(FLB_EVENT_LOOP_LIBEVENT)
+  message(STATUS "FLB Event loop backend > libevent")
+else()
+  FLB_DEFINITION(FLB_EVENT_LOOP_AUTO_DISCOVERY)
+  message(STATUS "FLB Event loop backend > auto discovery (Monkey library)")
+endif()
 
 # Build Monkey HTTP Server
 if(FLB_HTTP_SERVER)
@@ -703,6 +773,15 @@ if(FLB_HAVE_UNIX_SOCKET)
   FLB_DEFINITION(FLB_HAVE_UNIX_SOCKET)
 endif()
 
+# byte order detection
+test_big_endian(BIG_ENDIAN_SYSTEM_DETECTED)
+
+if (BIG_ENDIAN_SYSTEM_DETECTED)
+    FLB_DEFINITION(FLB_HAVE_BIG_ENDIAN_SYSTEM)
+else()
+    FLB_DEFINITION(FLB_HAVE_LITTLE_ENDIAN_SYSTEM)
+endif ()
+
 # Configuration file YAML format support
 if(FLB_CONFIG_YAML)
   find_package(PkgConfig)
@@ -923,7 +1002,16 @@ endif()
 # LuaJIT (Scripting Support)
 # ==========================
 if(FLB_LUAJIT)
-  include(cmake/luajit.cmake)
+  if(FLB_PREFER_SYSTEM_LIB_LUAJIT)
+    find_package(PkgConfig)
+    pkg_check_modules(LUAJIT luajit>=2.1.0)
+  endif()
+  if(LUAJIT_FOUND)
+    include_directories(${LUAJIT_INCLUDE_DIRS})
+    link_directories(${LUAJIT_LIBRARY_DIRS})
+  else()
+    include(cmake/luajit.cmake)
+  endif()
   FLB_DEFINITION(FLB_HAVE_LUAJIT)
 endif()
 
