@@ -35,7 +35,6 @@
 #include "azure_kusto_conf.h"
 #include "azure_kusto_ingest.h"
 #include "azure_kusto_store.h"
-/* #include "azure_imds.h" */
 
 
 flb_sds_t flb_azure_imds_get_token(struct flb_azure_kusto *ctx, flb_sds_t client_id)
@@ -99,7 +98,6 @@ static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
     int ret;
     flb_sds_t response = NULL;
     char *access_token = NULL;
-    struct flb_azure_imds *imds_ctx;
 
     flb_plg_debug(ctx->ins, "Starting token retrieval process");
 
@@ -107,16 +105,9 @@ static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
     if (ctx->use_imds == FLB_TRUE) {
         flb_plg_debug(ctx->ins, "Using IMDS for token retrieval");
 
-        /*imds_ctx = flb_azure_imds_create(ctx->config);
-        if (!imds_ctx) {
-            flb_plg_error(ctx->ins, "Failed to create Azure IMDS context");
-            return -1;
-        }*/
-
         response = flb_azure_imds_get_token(ctx, ctx->client_id);
         if (!response) {
             flb_plg_error(ctx->ins, "Failed to retrieve token from Azure IMDS");
-            //flb_azure_imds_destroy(imds_ctx);
             return -1;
         }
 
@@ -141,7 +132,6 @@ static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
         if (!access_token) {
             flb_plg_error(ctx->ins, "Error extracting access token from IMDS response");
             flb_sds_destroy(response);
-            //flb_azure_imds_destroy(imds_ctx);
             return -1;
         }
 
@@ -150,7 +140,6 @@ static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
         flb_free(access_token);
 
         flb_sds_destroy(response);
-        //flb_azure_imds_destroy(imds_ctx);
 
     } else {
         /* Use client secret flow */
