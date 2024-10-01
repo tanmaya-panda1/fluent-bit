@@ -185,12 +185,13 @@ static int send_blob(struct flb_config *config,
         uri = azb_block_blob_uri(ctx, tag, blockid, ms, generated_random_string);
     }
 
-    flb_plg_debug(ctx->ins, "generated blob uri ::: %s", uri);
-
     if (!uri) {
+        flb_plg_error(ctx->ins, "error occurred while trying to generate blob uri :::");
         flb_free(blockid);
         return FLB_RETRY;
     }
+
+    flb_plg_debug(ctx->ins, "generated blob uri ::: %s", uri);
 
     if (ctx->buffering_enabled == FLB_TRUE){
         ctx->u->base.flags &= ~(FLB_IO_ASYNC);
@@ -334,6 +335,8 @@ static int create_blob(struct flb_azure_blob *ctx, char *name)
 
     uri = azb_uri_create_blob(ctx, name);
     if (!uri) {
+        flb_plg_error(ctx->ins,
+                      "cannot create azb_uri_create_blob");
         return FLB_RETRY;
     }
 
