@@ -286,6 +286,14 @@ static int send_blob(struct flb_config *config,
         return FLB_RETRY;
     }
 
+    /* Log HTTP response details */
+    flb_plg_debug(ctx->ins, "HTTP response status: %d", c->resp.status);
+    /* Log response payload if any */
+    if (c->resp.payload_size > 0) {
+        flb_plg_debug(ctx->ins, "HTTP response payload: %.*s",
+                      (int) c->resp.payload_size, c->resp.payload);
+    }
+
     if (c->resp.status == 201) {
         flb_plg_info(ctx->ins, "content appended to blob successfully");
         flb_http_client_destroy(c);
