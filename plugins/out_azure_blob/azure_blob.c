@@ -498,6 +498,8 @@ static int create_container(struct flb_azure_blob *ctx, char *name)
  * Check that the container exists, if it doesn't and the configuration property
  * auto_create_container is enabled, it will send a request to create it. If it
  * could not be created or auto_create_container is disabled, it returns FLB_FALSE.
+ * If auto_create_container is disabled, it will return FLB_TRUE assuming the container
+ * already exists.
  */
 static int ensure_container(struct flb_azure_blob *ctx)
 {
@@ -508,8 +510,15 @@ static int ensure_container(struct flb_azure_blob *ctx)
     struct flb_http_client *c;
     struct flb_connection *u_conn;
 
+    if (!ctx->auto_create_container) {
+        flb_plg_info(ctx->ins, "auto_create_container is disabled, assuming container '%s' already exists",
+                     ctx->container_name);
+        return FLB_TRUE;
+    }
+
     uri = azb_uri_ensure_or_create_container(ctx);
     if (!uri) {
+        flb_plg_error(ctx->ins, "cannot create container URI");
         return FLB_FALSE;
     }
 
@@ -558,6 +567,13 @@ static int ensure_container(struct flb_azure_blob *ctx)
     /* Release connection */
     flb_upstream_conn_release(u_conn);
 
+    /* Log HTTP response details and payload*/
+    flb_plg_debug(ctx->ins, "ensure container :: HTTP response status: %d", c->resp.status);
+    if (c->resp.payload_size > 0) {
+        flb_plg_debug(ctx->ins, "ensure container HTTP response payload: %.*s",
+                      (int) c->resp.payload_size, c->resp.payload);
+    }
+
     /* Request was successful, validate HTTP status code */
     if (status == 404) {
         /* The container was not found, try to create it */
@@ -567,8 +583,15 @@ static int ensure_container(struct flb_azure_blob *ctx)
         return ret;
     }
     else if (status == 200) {
+        flb_plg_info(ctx->ins, "container '%s' already exists", ctx->container_name);
         return FLB_TRUE;
+    }else if (status == 403) {
+        flb_plg_error(ctx->ins, "failed getting container '%s', access issues",
+                      ctx->container_name);
+        return FLB_FALSE;
     }
+    flb_plg_debug(ctx->ins, "get container request failed, status=%i",
+                  status);
 
     return FLB_FALSE;
 }
@@ -979,6 +1002,8 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
             /* Validate the container exists, otherwise just create it */
             ret = ensure_container(ctx);
             if (ret == FLB_FALSE) {
+                flb_plg_error(ctx->ins, "cannot ensure container '%s' exists",
+                              ctx->container_name);
                 FLB_OUTPUT_RETURN(FLB_RETRY);
             }
 
@@ -1025,6 +1050,8 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
         /* Validate the container exists, otherwise just create it */
         ret = ensure_container(ctx);
         if (ret == FLB_FALSE) {
+            flb_plg_error(ctx->ins, "cannot ensure container '%s' exists",
+                          ctx->container_name);
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
 
