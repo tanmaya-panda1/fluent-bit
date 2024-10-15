@@ -219,16 +219,16 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
                         ret = -1;
 
                         if (c->resp.payload_size > 0) {
-                            flb_plg_debug(ctx->ins, "Request failed and returned: \n%s",
+                            flb_plg_error(ctx->ins, "create blob Request failed and returned: \n%s",
                                           c->resp.payload);
                         }
                         else {
-                            flb_plg_debug(ctx->ins, "Request failed");
+                            flb_plg_error(ctx->ins, "create blob Request failed");
                         }
                     }
                 }
                 else {
-                    flb_plg_error(ctx->ins, "cannot send HTTP request");
+                    flb_plg_error(ctx->ins, "create blob cannot send HTTP request");
                 }
 
                 flb_http_client_destroy(c);
@@ -474,17 +474,17 @@ static int azure_kusto_enqueue_ingestion(struct flb_azure_kusto *ctx, flb_sds_t 
                             ret = -1;
 
                             if (c->resp.payload_size > 0) {
-                                flb_plg_debug(ctx->ins,
-                                              "Request failed and returned: \n%s",
+                                flb_plg_error(ctx->ins,
+                                              "kusto queue Request failed and returned: \n%s",
                                               c->resp.payload);
                             }
                             else {
-                                flb_plg_debug(ctx->ins, "Request failed");
+                                flb_plg_error(ctx->ins, "kusto queue Request failed");
                             }
                         }
                     }
                     else {
-                        flb_plg_error(ctx->ins, "cannot send HTTP request");
+                        flb_plg_error(ctx->ins, "kusto queue cannot send HTTP request");
                     }
 
                     flb_http_client_destroy(c);

@@ -300,14 +300,14 @@ flb_sds_t execute_ingest_csl_command(struct flb_azure_kusto *ctx, const char *cs
                             resp = flb_sds_create_len(c->resp.payload, c->resp.payload_size);
                         }
                         else {
-                            flb_plg_error(ctx->ins, "Request failed with HTTP Status: %i", c->resp.status);
+                            flb_plg_error(ctx->ins, "Kusto Ingestion Resources Request failed with HTTP Status: %i", c->resp.status);
                             if (c->resp.payload_size > 0) {
-                                flb_plg_error(ctx->ins, "Response payload: \n%s", c->resp.payload);
+                                flb_plg_error(ctx->ins, "Kusto Ingestion Resources Response payload: \n%s", c->resp.payload);
                             }
                         }
                     }
                     else {
-                        flb_plg_error(ctx->ins, "cannot send HTTP request");
+                        flb_plg_error(ctx->ins, "Kusto Ingestion Resources :: cannot send HTTP request");
                     }
 
                     flb_http_client_destroy(c);
@@ -1418,7 +1418,7 @@ static int cb_azure_kusto_exit(void *data, struct flb_config *config)
     }
 
     if (azure_kusto_store_has_data(ctx) == FLB_TRUE) {
-        flb_plg_info(ctx->ins, "Sending all locally buffered data to S3");
+        flb_plg_info(ctx->ins, "Sending all locally buffered data to Kusto");
         ret = ingest_all_chunks(ctx, config);
         if (ret < 0) {
             flb_plg_error(ctx->ins, "Could not send all chunks on exit");

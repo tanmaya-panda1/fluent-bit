@@ -451,6 +451,13 @@ int azure_kusto_generate_random_integer() {
         pod_id = "default_pod_id";
     }
 
+    // Retrieve the cluster name from the environment variable
+    const char *cluster_name = getenv("CLUSTER_NAME");
+    if (cluster_name == NULL) {
+        // Fallback to a default cluster name if the environment variable is not set
+        cluster_name = "default_cluster_name";
+    }
+
     // Get the current time with high resolution
     struct timeval tv;
     gettimeofday(&tv, NULL);
@@ -458,9 +465,9 @@ int azure_kusto_generate_random_integer() {
     // Get the process ID
     pid_t pid = getpid();
 
-    // Combine pod ID, current time, and process ID into a single string
-    char combined[256];
-    snprintf(combined, sizeof(combined), "%s%ld%d%d", pod_id, tv.tv_sec, tv.tv_usec, pid);
+    // Combine pod ID, cluster name, current time, and process ID into a single string
+    char combined[512];
+    snprintf(combined, sizeof(combined), "%s%s%ld%d%d", pod_id, cluster_name, tv.tv_sec, tv.tv_usec, pid);
 
     // Compute SHA-256 hash of the combined string
     unsigned char hash[SHA256_DIGEST_LENGTH];

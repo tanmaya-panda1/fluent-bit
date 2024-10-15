@@ -312,7 +312,7 @@ int azure_kusto_store_init(struct flb_azure_kusto *ctx)
      * all the 'new' data that is generated on this process is stored there.
      *
      * Note that previous data in similar directories from previous runs is
-     * considered backlog data, in the azure_kusto plugin we need to differenciate the
+     * considered backlog data, in the azure_kusto plugin we need to differentiate the
      * new v/s the older buffered data.
      *
      * Compose a stream name...
@@ -377,11 +377,58 @@ int azure_kusto_store_exit(struct flb_azure_kusto *ctx)
     return 0;
 }
 
+int azure_kusto_store_has_data(struct flb_azure_kusto *ctx)
+{
+    struct mk_list *head;
+    struct flb_fstore_stream *fs_stream;
+
+    // Check if the file storage context is initialized
+    if (!ctx->fs) {
+        flb_plg_debug(ctx->ins, "File storage context is not initialized");
+        return FLB_FALSE;
+    }
+
+    // Iterate over each stream in the file storage
+    mk_list_foreach(head, &ctx->fs->streams) {
+        fs_stream = mk_list_entry(head, struct flb_fstore_stream, _head);
+
+        // Log the name of the current stream being processed
+        flb_plg_debug(ctx->ins, "Processing stream: '%s'", fs_stream->name);
+
+        // Check if the current stream is the one used for uploads
+        if (fs_stream == ctx->stream_upload) {
+            flb_plg_debug(ctx->ins, "Skipping upload stream: '%s'", fs_stream->name);
+            continue;
+        }
+
+        // Log the number of files in the current stream
+        int file_count = mk_list_size(&fs_stream->files);
+        flb_plg_debug(ctx->ins, "Stream '%s' has %d files", fs_stream->name, file_count);
+
+        // If there are files, log their names and return true
+        if (file_count > 0) {
+            struct mk_list *file_head;
+            struct flb_fstore_file *fs_file;
+
+            mk_list_foreach(file_head, &fs_stream->files) {
+                fs_file = mk_list_entry(file_head, struct flb_fstore_file, _head);
+                flb_plg_debug(ctx->ins, "File in stream '%s': '%s'", fs_stream->name, fs_file->name);
+            }
+
+            return FLB_TRUE;
+        }
+    }
+
+    // Log if no data was found in any stream
+    flb_plg_debug(ctx->ins, "No data found in any stream");
+    return FLB_FALSE;
+}
+
 /*
  * Check if the store has data. This function is only used on plugin
  * initialization
  */
-int azure_kusto_store_has_data(struct flb_azure_kusto *ctx)
+int azure_kusto_store_has_data_ext(struct flb_azure_kusto *ctx)
 {
     struct mk_list *head;
     struct flb_fstore_stream *fs_stream;
@@ -396,6 +443,8 @@ int azure_kusto_store_has_data(struct flb_azure_kusto *ctx)
         if (fs_stream == ctx->stream_upload) {
             continue;
         }
+
+        flb_plg_debug(ctx->ins, "Stream '%s' has %d files", fs_stream->name, mk_list_size(&fs_stream->files));
 
         if (mk_list_size(&fs_stream->files) > 0) {
             return FLB_TRUE;
