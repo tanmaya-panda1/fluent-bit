@@ -837,7 +837,6 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
     if (ctx->buffering_enabled == FLB_TRUE) {
         ctx->ins = ins;
         ctx->retry_time = 0;
-        ctx->has_old_buffers = azure_kusto_store_has_data(ctx);
 
         /* Initialize local storage */
         int ret = azure_kusto_store_init(ctx);
@@ -846,6 +845,7 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
                           ctx->store_dir);
             return -1;
         }
+        ctx->has_old_buffers = azure_kusto_store_has_data(ctx);
 
         /* validate 'total_file_size' */
         if (ctx->file_size <= 0) {
