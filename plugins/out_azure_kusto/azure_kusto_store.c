@@ -499,6 +499,19 @@ void azure_kusto_file_cleanup(struct azure_kusto_file *file)
     //flb_free(file);
 }
 
+int azure_kusto_store_file_cleanup(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file)
+{
+    struct flb_fstore_file *fsf;
+
+    fsf = azure_kusto_file->fsf;
+
+    /* permanent deletion */
+    flb_fstore_file_delete(ctx->fs, fsf);
+    flb_free(azure_kusto_file);
+
+    return 0;
+}
+
 int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file)
 {
     struct flb_fstore_file *fsf;
