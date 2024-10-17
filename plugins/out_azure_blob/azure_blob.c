@@ -612,7 +612,6 @@ static int cb_azure_blob_init(struct flb_output_instance *ins,
     if (ctx->buffering_enabled == FLB_TRUE) {
         ctx->ins = ins;
         ctx->retry_time = 0;
-        ctx->has_old_buffers = azure_blob_store_has_data(ctx);
 
         /* Initialize local storage */
         int ret = azure_blob_store_init(ctx);
@@ -635,7 +634,7 @@ static int cb_azure_blob_init(struct flb_output_instance *ins,
             flb_plg_error(ctx->ins, "Max total_file_size must be lower than %ld bytes", MAX_FILE_SIZE);
             return -1;
         }
-
+        ctx->has_old_buffers = azure_blob_store_has_data(ctx);
         ctx->timer_created = FLB_FALSE;
         ctx->timer_ms = (int) (ctx->upload_timeout / 6) * 1000;
         flb_plg_info(ctx->ins, "Using upload size %lu bytes", ctx->file_size);
@@ -838,7 +837,7 @@ static int ingest_all_chunks(struct flb_azure_blob *ctx, struct flb_config *conf
 
             if (chunk->failures >= MAX_UPLOAD_ERRORS) {
                 flb_plg_warn(ctx->ins,
-                             "Chunk for tag %s failed to send %i times, "
+                             "ingest_all_chunks :: Chunk for tag %s failed to send %i times, "
                              "will not retry",
                              (char *) fsf->meta_buf, MAX_UPLOAD_ERRORS);
                 flb_fstore_file_inactive(ctx->fs, fsf);
@@ -849,7 +848,7 @@ static int ingest_all_chunks(struct flb_azure_blob *ctx, struct flb_config *conf
                                            &buffer, &buffer_size);
             if (ret < 0) {
                 flb_plg_error(ctx->ins,
-                              "Could not construct request buffer for %s",
+                              "ingest_all_chunks :: Could not construct request buffer for %s",
                               chunk->file_path);
                 return -1;
             }
@@ -868,7 +867,7 @@ static int ingest_all_chunks(struct flb_azure_blob *ctx, struct flb_config *conf
             }
 
             if (ret != FLB_OK) {
-                flb_plg_error(ctx->ins, "Failed to ingest data to Azure Blob Storage");
+                flb_plg_error(ctx->ins, "ingest_all_chunks :: Failed to ingest data to Azure Blob Storage");
                 flb_sds_destroy(tag_sds);
                 flb_sds_destroy(payload);
                 return -1;
@@ -878,7 +877,7 @@ static int ingest_all_chunks(struct flb_azure_blob *ctx, struct flb_config *conf
             flb_sds_destroy(payload);
 
             /* data was sent successfully- delete the local buffer */
-            azure_blob_store_file_delete(ctx, chunk);
+            azure_blob_store_file_cleanup(ctx, chunk);
         }
     }
 
@@ -895,7 +894,7 @@ static void flush_init(void *out_context, struct flb_config *config)
     if (ctx->has_old_buffers == FLB_TRUE) {
         flb_plg_info(ctx->ins,
                      "Sending locally buffered data from previous "
-                     "executions to kusto; buffer=%s",
+                     "executions to azure blob; buffer=%s",
                      ctx->fs->root_path);
         ctx->has_old_buffers = FLB_FALSE;
         ret = ingest_all_chunks(ctx, config);
@@ -907,6 +906,11 @@ static void flush_init(void *out_context, struct flb_config *config)
                           ctx->fs->root_path);
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
+    }else{
+        flb_plg_debug(ctx->ins,
+                      "Did not find any local buffered data from previous "
+                      "executions to azure blob; buffer=%s",
+                      ctx->fs->root_path);
     }
 
     /*

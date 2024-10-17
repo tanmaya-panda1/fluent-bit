@@ -420,6 +420,19 @@ void azure_blob_file_cleanup(struct azure_blob_file *file)
     //flb_free(file);
 }
 
+int azure_blob_store_file_cleanup(struct flb_azure_blob *ctx, struct azure_blob_file *azure_blob_file)
+{
+    struct flb_fstore_file *fsf;
+
+    fsf = azure_blob_file->fsf;
+
+    /* permanent deletion */
+    flb_fstore_file_delete(ctx->fs, fsf);
+    flb_free(azure_blob_file);
+
+    return 0;
+}
+
 int azure_blob_store_file_delete(struct flb_azure_blob *ctx, struct azure_blob_file *azure_blob_file)
 {
     struct flb_fstore_file *fsf;
