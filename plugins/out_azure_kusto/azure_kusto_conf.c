@@ -25,11 +25,9 @@
 #include <fluent-bit/flb_sds.h>
 #include <fluent-bit/flb_upstream_ha.h>
 #include <fluent-bit/flb_utils.h>
-#include <sys/time.h>
 #include <openssl/sha.h>
 #include <openssl/rand.h>
 #include <unistd.h>
-#include <sys/time.h>
 #include <pthread.h>
 #include <fluent-bit/flb_time.h>
 
