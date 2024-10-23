@@ -31,10 +31,7 @@
 #include <unistd.h>
 #include <sys/time.h>
 #include <pthread.h>
-#ifdef FLB_SYSTEM_WINDOWS
-#include <Windows.h>
-#include <Process.h>
-#endif
+#include <fluent-bit/flb_time.h>
 
 #include "azure_kusto.h"
 #include "azure_kusto_conf.h"
@@ -473,22 +470,17 @@ int azure_kusto_generate_random_integer() {
     const char *cluster_name = getenv("CLUSTER_NAME");
     pod_id = pod_id ? pod_id : "default_pod_id";
     cluster_name = cluster_name ? cluster_name : "default_cluster_name";
+    struct flb_time tm_now;
+    uint64_t now;
 
     // Get current time with high precision
-#ifdef FLB_SYSTEM_WINDOWS
-    LARGE_INTEGER ts;
-        QueryPerformanceCounter(&ts);
-        unsigned long long current_time = ts.QuadPart;
-#else
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    unsigned long long current_time = (unsigned long long)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
-#endif
+    flb_time_get(&tm_now);
+    uint64_t current_time = flb_time_to_nanosec(&tm_now);
 
     // Get process ID and thread ID
 #ifdef FLB_SYSTEM_WINDOWS
     unsigned long pid = GetCurrentProcessId();
-        unsigned long tid = GetCurrentThreadId();
+    unsigned long tid = GetCurrentThreadId();
 #else
     unsigned long pid = getpid();
     unsigned long tid = (unsigned long)pthread_self();
@@ -533,33 +525,6 @@ int azure_kusto_generate_random_integer() {
     return random_integer;
 }
 
-uint64_t get_current_time_in_milliseconds() {
-#ifdef _WIN32
-    FILETIME ft;
-    GetSystemTimeAsFileTime(&ft);
-
-    // Convert FILETIME to a 64-bit integer
-    ULARGE_INTEGER uli;
-    uli.LowPart = ft.dwLowDateTime;
-    uli.HighPart = ft.dwHighDateTime;
-
-    // FILETIME is in 100-nanosecond intervals since January 1, 1601 (UTC)
-    // Convert to milliseconds since January 1, 1970 (Unix epoch)
-    const ULONGLONG EPOCH_DIFFERENCE = 11644473600000000ULL;
-    uint64_t timeInMilliseconds = (uli.QuadPart - EPOCH_DIFFERENCE) / 10000;
-
-    return timeInMilliseconds;
-#else
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-
-    // Convert to milliseconds
-    uint64_t milliseconds = (uint64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
-
-    return milliseconds;
-#endif
-}
-
 
 int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
                                          struct flb_config *config)
@@ -569,13 +534,15 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
     flb_sds_t identity_token = NULL;
     struct flb_upstream_ha *blob_ha = NULL;
     struct flb_upstream_ha *queue_ha = NULL;
+    struct flb_time tm_now;
     uint64_t now;
 
     int generated_random_integer = azure_kusto_generate_random_integer();
     flb_plg_debug(ctx->ins, "generated random integer %d", generated_random_integer);
 
     //now = time(NULL);
-    now = get_current_time_in_milliseconds();
+    flb_time_get(&tm_now);
+    now = flb_time_to_millisec(&tm_now);
     flb_plg_debug(ctx->ins, "current time %llu", now);
     flb_plg_debug(ctx->ins, "load_time is %llu", ctx->resources->load_time);
     flb_plg_debug(ctx->ins, "difference is  %llu", now - ctx->resources->load_time);
