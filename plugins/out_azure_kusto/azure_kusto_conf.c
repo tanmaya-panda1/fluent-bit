@@ -28,12 +28,23 @@
 #include <sys/time.h>
 #include <openssl/sha.h>
 #include <openssl/rand.h>
+#include <unistd.h>
+#include <sys/time.h>
+#include <pthread.h>
 #ifdef FLB_SYSTEM_WINDOWS
 #include <Windows.h>
+#include <Process.h>
 #endif
 
 #include "azure_kusto.h"
 #include "azure_kusto_conf.h"
+
+// Constants for PCG random number generator
+#define PCG_DEFAULT_MULTIPLIER_64  6364136223846793005ULL
+#define PCG_DEFAULT_INCREMENT_64   1442695040888963407ULL
+
+// PCG random number generator state
+typedef struct { uint64_t state;  uint64_t inc; } pcg32_random_t;
 
 static struct flb_upstream_node *flb_upstream_node_create_url(struct flb_azure_kusto *ctx,
                                                               struct flb_config *config,
@@ -440,6 +451,15 @@ static flb_sds_t parse_ingestion_identity_token(struct flb_azure_kusto *ctx,
     return identity_token;
 }
 
+// PCG random number generator function
+static uint32_t pcg32_random_r(pcg32_random_t* rng) {
+    uint64_t oldstate = rng->state;
+    rng->state = oldstate * PCG_DEFAULT_MULTIPLIER_64 + rng->inc;
+    uint32_t xorshifted = ((oldstate >> 18u) ^ oldstate) >> 27u;
+    uint32_t rot = oldstate >> 59u;
+    return (xorshifted >> rot) | (xorshifted << ((-rot) & 31));
+}
+
 
 
 /**
@@ -448,71 +468,68 @@ static flb_sds_t parse_ingestion_identity_token(struct flb_azure_kusto *ctx,
  * in kusto DM for .get ingestion resources upon expiry
  * */
 int azure_kusto_generate_random_integer() {
-    // Retrieve the Kubernetes Pod ID from the environment variable
+    // Get environment variables or use default values
     const char *pod_id = getenv("HOSTNAME");
-    if (pod_id == NULL) {
-        pod_id = "default_pod_id";
-    }
-
-    // Retrieve the cluster name from the environment variable
     const char *cluster_name = getenv("CLUSTER_NAME");
-    if (cluster_name == NULL) {
-        cluster_name = "default_cluster_name";
-    }
+    pod_id = pod_id ? pod_id : "default_pod_id";
+    cluster_name = cluster_name ? cluster_name : "default_cluster_name";
 
-    // Get the current time with high resolution
-    long seconds, microseconds;
+    // Get current time with high precision
 #ifdef FLB_SYSTEM_WINDOWS
-    FILETIME ft;
-    GetSystemTimeAsFileTime(&ft);
-
-    ULARGE_INTEGER uli;
-    uli.LowPart = ft.dwLowDateTime;
-    uli.HighPart = ft.dwHighDateTime;
-
-    const ULONGLONG EPOCH_DIFFERENCE = 11644473600000000ULL;
-    ULONGLONG timeInMicroseconds = (uli.QuadPart - EPOCH_DIFFERENCE) / 10;
-
-    seconds = timeInMicroseconds / 1000000;
-    microseconds = timeInMicroseconds % 1000000;
+    LARGE_INTEGER ts;
+        QueryPerformanceCounter(&ts);
+        unsigned long long current_time = ts.QuadPart;
 #else
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    seconds = tv.tv_sec;
-    microseconds = tv.tv_usec;
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    unsigned long long current_time = (unsigned long long)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
 #endif
 
-    // Get the process ID
-    unsigned long pid;
+    // Get process ID and thread ID
 #ifdef FLB_SYSTEM_WINDOWS
-    pid = GetCurrentProcessId();
+    unsigned long pid = GetCurrentProcessId();
+        unsigned long tid = GetCurrentThreadId();
 #else
-    pid = getpid();
+    unsigned long pid = getpid();
+    unsigned long tid = (unsigned long)pthread_self();
 #endif
+    // Combine all sources of entropy into a single string
+    char combined[1024];
+    snprintf(combined, sizeof(combined), "%s%s%llu%lu%lu%p",
+             pod_id, cluster_name, current_time, pid, tid, (void*)&combined);
 
-    // Combine pod ID, cluster name, current time, and process ID into a single string
-    char combined[512];
-    snprintf(combined, sizeof(combined), "%s%s%ld%ld%lu", pod_id, cluster_name, seconds, microseconds, pid);
-
-    // Compute SHA-256 hash of the combined string
+    // Generate SHA256 hash of the combined string
     unsigned char hash[SHA256_DIGEST_LENGTH];
     SHA256((unsigned char*)combined, strlen(combined), hash);
 
-    // Use the first 4 bytes of the hash as part of the seed
-    unsigned int seed_part = *(unsigned int*)hash;
-
-    // Generate additional random bytes using OpenSSL's CSPRNG
-    unsigned char random_bytes[4];
-    if (RAND_bytes(random_bytes, sizeof(random_bytes)) != 1) {
+    // Generate additional entropy
+    unsigned char entropy[32];
+    if (RAND_bytes(entropy, sizeof(entropy)) != 1) {
         fprintf(stderr, "Error generating random bytes\n");
         return -1;
     }
 
-    // Combine the seed part with the random bytes
-    unsigned int final_seed = seed_part ^ *(unsigned int*)random_bytes;
+    // Generate an additional 64-bit random number
+    uint64_t additional_random;
+    if (RAND_bytes((unsigned char*)&additional_random, sizeof(additional_random)) != 1) {
+        fprintf(stderr, "Error generating additional random bytes\n");
+        return -1;
+    }
 
-    // Use the final seed to generate a random integer in the desired range
-    int random_integer = (final_seed % 4200001) - 600000;
+    // XOR the hash with the additional entropy
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        hash[i] ^= entropy[i];
+    }
+
+    // Initialize PCG random number generator
+    pcg32_random_t rng;
+    rng.state = *(uint64_t*)hash ^ additional_random;  // XOR with additional random number
+    rng.inc = *(uint64_t*)(hash + 8);
+
+    // Generate random value and scale it to desired range
+    uint32_t random_value = pcg32_random_r(&rng);
+    int random_integer = (random_value % 4200001) - 600000;
+
     return random_integer;
 }
 
@@ -562,7 +579,7 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
     flb_plg_debug(ctx->ins, "current time %llu", now);
     flb_plg_debug(ctx->ins, "load_time is %llu", ctx->resources->load_time);
     flb_plg_debug(ctx->ins, "difference is  %llu", now - ctx->resources->load_time);
-    flb_plg_debug(ctx->ins, "effective ingestion resource interval is %d", ctx->ingestion_resources_refresh_interval + generated_random_integer);
+    flb_plg_debug(ctx->ins, "effective ingestion resource interval is %d", ctx->ingestion_resources_refresh_interval * 1000 + generated_random_integer);
 
     /* check if we have all resources and they are not stale */
     if (ctx->resources->blob_ha && ctx->resources->queue_ha &&
@@ -572,7 +589,7 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
         ret = 0;
     }
     else {
-        flb_plg_info(ctx->ins, "loading kusto ingestion resources and refresh interval is %d", ctx->ingestion_resources_refresh_interval + generated_random_integer);
+        flb_plg_info(ctx->ins, "loading kusto ingestion resources and refresh interval is %d", ctx->ingestion_resources_refresh_interval * 1000 + generated_random_integer);
         response = execute_ingest_csl_command(ctx, ".get ingestion resources");
 
         if (response) {
