@@ -475,7 +475,7 @@ static int azure_kusto_enqueue_ingestion(struct flb_azure_kusto *ctx, flb_sds_t 
 
                             if (c->resp.payload_size > 0) {
                                 flb_plg_error(ctx->ins,
-                                              "kusto queue Request failed and returned: \n%s",
+                                              "kusto queue Request failed and returned: %s",
                                               c->resp.payload);
                             }
                             else {

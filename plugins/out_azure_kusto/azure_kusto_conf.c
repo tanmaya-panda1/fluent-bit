@@ -27,6 +27,10 @@
 #include <fluent-bit/flb_utils.h>
 #include <sys/time.h>
 #include <openssl/sha.h>
+#include <openssl/rand.h>
+#ifdef FLB_SYSTEM_WINDOWS
+#include <Windows.h>
+#endif
 
 #include "azure_kusto.h"
 #include "azure_kusto_conf.h"
@@ -439,7 +443,7 @@ static flb_sds_t parse_ingestion_identity_token(struct flb_azure_kusto *ctx,
 
 
 /**
- * This method returns random integers from range -600 to +3600 which needs to be added
+ * This method returns random integers from range -600000 to +3600000 which needs to be added
  * to the kusto ingestion resources refresh interval to even out the spikes
  * in kusto DM for .get ingestion resources upon expiry
  * */
@@ -447,39 +451,96 @@ int azure_kusto_generate_random_integer() {
     // Retrieve the Kubernetes Pod ID from the environment variable
     const char *pod_id = getenv("HOSTNAME");
     if (pod_id == NULL) {
-        // Fallback to process ID if the environment variable is not set
         pod_id = "default_pod_id";
     }
 
     // Retrieve the cluster name from the environment variable
     const char *cluster_name = getenv("CLUSTER_NAME");
     if (cluster_name == NULL) {
-        // Fallback to a default cluster name if the environment variable is not set
         cluster_name = "default_cluster_name";
     }
 
     // Get the current time with high resolution
+    long seconds, microseconds;
+#ifdef FLB_SYSTEM_WINDOWS
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+
+    ULARGE_INTEGER uli;
+    uli.LowPart = ft.dwLowDateTime;
+    uli.HighPart = ft.dwHighDateTime;
+
+    const ULONGLONG EPOCH_DIFFERENCE = 11644473600000000ULL;
+    ULONGLONG timeInMicroseconds = (uli.QuadPart - EPOCH_DIFFERENCE) / 10;
+
+    seconds = timeInMicroseconds / 1000000;
+    microseconds = timeInMicroseconds % 1000000;
+#else
     struct timeval tv;
     gettimeofday(&tv, NULL);
+    seconds = tv.tv_sec;
+    microseconds = tv.tv_usec;
+#endif
 
     // Get the process ID
-    pid_t pid = getpid();
+    unsigned long pid;
+#ifdef FLB_SYSTEM_WINDOWS
+    pid = GetCurrentProcessId();
+#else
+    pid = getpid();
+#endif
 
     // Combine pod ID, cluster name, current time, and process ID into a single string
     char combined[512];
-    snprintf(combined, sizeof(combined), "%s%s%ld%d%d", pod_id, cluster_name, tv.tv_sec, tv.tv_usec, pid);
+    snprintf(combined, sizeof(combined), "%s%s%ld%ld%lu", pod_id, cluster_name, seconds, microseconds, pid);
 
     // Compute SHA-256 hash of the combined string
     unsigned char hash[SHA256_DIGEST_LENGTH];
     SHA256((unsigned char*)combined, strlen(combined), hash);
 
-    // Use the first 4 bytes of the hash as the seed
-    unsigned int seed = *(unsigned int*)hash;
-    srand(seed);
+    // Use the first 4 bytes of the hash as part of the seed
+    unsigned int seed_part = *(unsigned int*)hash;
 
-    // Generate a random integer in the range [-600, 3600]
-    int random_integer = rand() % 4201 - 600;
+    // Generate additional random bytes using OpenSSL's CSPRNG
+    unsigned char random_bytes[4];
+    if (RAND_bytes(random_bytes, sizeof(random_bytes)) != 1) {
+        fprintf(stderr, "Error generating random bytes\n");
+        return -1;
+    }
+
+    // Combine the seed part with the random bytes
+    unsigned int final_seed = seed_part ^ *(unsigned int*)random_bytes;
+
+    // Use the final seed to generate a random integer in the desired range
+    int random_integer = (final_seed % 4200001) - 600000;
     return random_integer;
+}
+
+uint64_t get_current_time_in_milliseconds() {
+#ifdef _WIN32
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+
+    // Convert FILETIME to a 64-bit integer
+    ULARGE_INTEGER uli;
+    uli.LowPart = ft.dwLowDateTime;
+    uli.HighPart = ft.dwHighDateTime;
+
+    // FILETIME is in 100-nanosecond intervals since January 1, 1601 (UTC)
+    // Convert to milliseconds since January 1, 1970 (Unix epoch)
+    const ULONGLONG EPOCH_DIFFERENCE = 11644473600000000ULL;
+    uint64_t timeInMilliseconds = (uli.QuadPart - EPOCH_DIFFERENCE) / 10000;
+
+    return timeInMilliseconds;
+#else
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+
+    // Convert to milliseconds
+    uint64_t milliseconds = (uint64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+
+    return milliseconds;
+#endif
 }
 
 
@@ -491,17 +552,22 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
     flb_sds_t identity_token = NULL;
     struct flb_upstream_ha *blob_ha = NULL;
     struct flb_upstream_ha *queue_ha = NULL;
-    time_t now;
+    uint64_t now;
 
     int generated_random_integer = azure_kusto_generate_random_integer();
     flb_plg_debug(ctx->ins, "generated random integer %d", generated_random_integer);
 
-    now = time(NULL);
+    //now = time(NULL);
+    now = get_current_time_in_milliseconds();
+    flb_plg_debug(ctx->ins, "current time %llu", now);
+    flb_plg_debug(ctx->ins, "load_time is %llu", ctx->resources->load_time);
+    flb_plg_debug(ctx->ins, "difference is  %llu", now - ctx->resources->load_time);
+    flb_plg_debug(ctx->ins, "effective ingestion resource interval is %d", ctx->ingestion_resources_refresh_interval + generated_random_integer);
 
     /* check if we have all resources and they are not stale */
     if (ctx->resources->blob_ha && ctx->resources->queue_ha &&
         ctx->resources->identity_token &&
-        now - ctx->resources->load_time < ctx->ingestion_resources_refresh_interval + generated_random_integer) {
+        now - ctx->resources->load_time < ctx->ingestion_resources_refresh_interval * 1000 + generated_random_integer) {
         flb_plg_debug(ctx->ins, "resources are already loaded and are not stale");
         ret = 0;
     }

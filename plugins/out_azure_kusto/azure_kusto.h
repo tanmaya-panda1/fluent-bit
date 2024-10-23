@@ -77,7 +77,7 @@ struct flb_azure_kusto_resources {
     flb_sds_t identity_token;
 
     /* used to reload resouces after some time */
-    time_t load_time;
+    uint64_t load_time;
 };
 
 struct flb_azure_kusto {
