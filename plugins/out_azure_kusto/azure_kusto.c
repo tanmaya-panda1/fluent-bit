@@ -30,6 +30,7 @@
 #include <fluent-bit/flb_fstore.h>
 #include <msgpack.h>
 #include <fluent-bit/flb_version.h>
+#include <unistd.h>
 
 #include "azure_kusto.h"
 #include "azure_kusto_conf.h"
@@ -538,6 +539,11 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
     flb_sds_t tag_sds;
     int is_compressed = FLB_FALSE;
     int retry_count;
+    int backoff_time;
+    int max_backoff_time = 64; // Maximum backoff time in seconds
+
+    // Initialize random seed for staggered refresh intervals
+    srand(time(NULL));
 
     // Log the start of the upload timer callback
     flb_plg_debug(ctx->ins, "Running upload timer callback (scheduler_kusto_ingest)..");
@@ -562,6 +568,8 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
         }
 
         retry_count = 0;
+        backoff_time = 2; // Initial backoff time in seconds
+
         // Retry loop for handling retries
         while (retry_count < ctx->scheduler_max_retries) {
             flb_plg_debug(ctx->ins, "scheduler_kusto_ingest :: Before construct_request_buffer %s", file->fsf->name);
@@ -571,6 +579,10 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
             if (ret < 0) {
                 flb_plg_error(ctx->ins, "scheduler_kusto_ingest :: Could not construct request buffer for %s", file->fsf->name);
                 retry_count++;
+                // Add jitter: random value between 0 and backoff_time
+                int jitter = rand() % backoff_time;
+                sleep(backoff_time + jitter); // Exponential backoff with jitter
+                backoff_time = (backoff_time * 2 < max_backoff_time) ? backoff_time * 2 : max_backoff_time; // Double the backoff time, but cap it
                 continue; // Retry on failure
             }
 
@@ -585,6 +597,10 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
                     flb_sds_destroy(payload);
                     flb_sds_destroy(tag_sds);
                     retry_count++;
+                    // Add jitter: random value between 0 and backoff_time
+                    int jitter = rand() % backoff_time;
+                    sleep(backoff_time + jitter); // Exponential backoff with jitter
+                    backoff_time = (backoff_time * 2 < max_backoff_time) ? backoff_time * 2 : max_backoff_time; // Double the backoff time, but cap it
                     continue; // Retry on failure
                 } else {
                     is_compressed = FLB_TRUE;
@@ -602,6 +618,10 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
             if (ret != 0) {
                 flb_plg_error(ctx->ins, "scheduler_kusto_ingest :: cannot load ingestion resources");
                 retry_count++;
+                // Add jitter: random value between 0 and backoff_time
+                int jitter = rand() % backoff_time;
+                sleep(backoff_time + jitter); // Exponential backoff with jitter
+                backoff_time = (backoff_time * 2 < max_backoff_time) ? backoff_time * 2 : max_backoff_time; // Double the backoff time, but cap it
                 continue; // Retry on failure
             }
 
@@ -616,6 +636,10 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
                     azure_kusto_store_file_unlock(file);
                     file->failures += 1;
                 }
+                // Add jitter: random value between 0 and backoff_time
+                int jitter = rand() % backoff_time;
+                sleep(backoff_time + jitter); // Exponential backoff with jitter
+                backoff_time = (backoff_time * 2 < max_backoff_time) ? backoff_time * 2 : max_backoff_time; // Double the backoff time, but cap it
                 continue; // Retry on failure
             }
 
