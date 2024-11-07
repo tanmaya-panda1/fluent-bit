@@ -81,6 +81,7 @@ struct flb_azure_blob {
     int blob_uri_length;
 
     int has_old_buffers;
+    int scheduler_max_retries;
     /* track the total amount of buffered data */
     size_t current_buffer_size;
     char *store_dir;

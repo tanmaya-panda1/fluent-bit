@@ -594,11 +594,18 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
                 ret = flb_gzip_compress((void *) payload, flb_sds_len(payload), &final_payload, &final_payload_size);
                 if (ret != 0) {
                     flb_plg_error(ctx->ins, "scheduler_kusto_ingest :: cannot gzip payload");
+                    flb_free(buffer);
                     flb_sds_destroy(payload);
                     flb_sds_destroy(tag_sds);
                     retry_count++;
+                    if (file){
+                        azure_kusto_store_file_unlock(file);
+                        file->failures += 1;
+                    }
                     // Add jitter: random value between 0 and backoff_time
                     int jitter = rand() % backoff_time;
+                    flb_plg_warn(ctx->ins, "scheduler_kusto_ingest :: failed while compressing payload :: Retrying in %d seconds (attempt %d of %d) with jitter %d for file %s",
+                                 backoff_time + jitter, retry_count, ctx->scheduler_max_retries, jitter, file->fsf->name);
                     sleep(backoff_time + jitter); // Exponential backoff with jitter
                     backoff_time = (backoff_time * 2 < max_backoff_time) ? backoff_time * 2 : max_backoff_time; // Double the backoff time, but cap it
                     continue; // Retry on failure
@@ -617,9 +624,24 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
             ret = azure_kusto_load_ingestion_resources(ctx, config);
             if (ret != 0) {
                 flb_plg_error(ctx->ins, "scheduler_kusto_ingest :: cannot load ingestion resources");
+
+                // Free allocated resources
+                flb_free(buffer);
+                flb_sds_destroy(payload);
+                flb_sds_destroy(tag_sds);
+                if (is_compressed) {
+                    flb_free(final_payload);
+                }
+
                 retry_count++;
+                if (file){
+                    azure_kusto_store_file_unlock(file);
+                    file->failures += 1;
+                }
                 // Add jitter: random value between 0 and backoff_time
                 int jitter = rand() % backoff_time;
+                flb_plg_warn(ctx->ins, "scheduler_kusto_ingest :: error loading ingestion resources :: Retrying in %d seconds (attempt %d of %d) with jitter %d for file %s",
+                             backoff_time + jitter, retry_count, ctx->scheduler_max_retries, jitter, file->fsf->name);
                 sleep(backoff_time + jitter); // Exponential backoff with jitter
                 backoff_time = (backoff_time * 2 < max_backoff_time) ? backoff_time * 2 : max_backoff_time; // Double the backoff time, but cap it
                 continue; // Retry on failure
@@ -631,6 +653,15 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
             ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), final_payload, final_payload_size, NULL);
             if (ret != 0) {
                 flb_plg_error(ctx->ins, "scheduler_kusto_ingest: Failed to ingest data to kusto");
+
+                // Free allocated resources
+                flb_free(buffer);
+                flb_sds_destroy(payload);
+                flb_sds_destroy(tag_sds);
+                if (is_compressed) {
+                    flb_free(final_payload);
+                }
+
                 retry_count++;
                 if (file){
                     azure_kusto_store_file_unlock(file);
@@ -638,6 +669,8 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
                 }
                 // Add jitter: random value between 0 and backoff_time
                 int jitter = rand() % backoff_time;
+                flb_plg_warn(ctx->ins, "scheduler_kusto_ingest :: error while ingesting to kusto :: Retrying in %d seconds (attempt %d of %d) with jitter %d for file %s",
+                             backoff_time + jitter, retry_count, ctx->scheduler_max_retries, jitter, file->fsf->name);
                 sleep(backoff_time + jitter); // Exponential backoff with jitter
                 backoff_time = (backoff_time * 2 < max_backoff_time) ? backoff_time * 2 : max_backoff_time; // Double the backoff time, but cap it
                 continue; // Retry on failure
@@ -670,7 +703,7 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
         // If the maximum number of retries is reached, log an error and move to the next file
         if (retry_count >= ctx->scheduler_max_retries) {
             flb_plg_error(ctx->ins, "Max retries reached for file %s", file->fsf->name);
-            file->locked = FLB_FALSE; // Unlock the file for retry in the next iteration
+            azure_kusto_store_file_unlock(file); // Unlock the file for retry in the next iteration
         }
     }
     // Log the end of the upload timer callback
@@ -678,114 +711,8 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
 }
 
 
-
-static void cb_azure_kusto_ingest_ext(struct flb_config *config, void *data)
-{
-    struct flb_azure_kusto *ctx = data;
-    struct azure_kusto_file *file = NULL;
-    struct flb_fstore_file *fsf;
-    char *buffer = NULL;
-    size_t buffer_size = 0;
-    void *final_payload = NULL;
-    size_t final_payload_size = 0;
-    struct mk_list *tmp;
-    struct mk_list *head;
-    int ret;
-    time_t now;
-    flb_sds_t payload;
-    flb_sds_t tag_sds;
-    int is_compressed = FLB_FALSE;
-
-    flb_plg_debug(ctx->ins, "Running upload timer callback (cb_azure_kusto_ingest)..");
-    flb_plg_debug(ctx->ins, "inside ctx : database name is %s", ctx->database_name);
-    now = time(NULL);
-
-    /* Check all chunks and see if any have timed out */
-    mk_list_foreach_safe(head, tmp, &ctx->stream_active->files) {
-        fsf = mk_list_entry(head, struct flb_fstore_file, _head);
-        file = fsf->data;
-        flb_plg_debug(ctx->ins, "Iterating files inside upload timer callback (cb_azure_kusto_ingest).. %s", file->fsf->name);
-        if (now < (file->create_time + ctx->upload_timeout + ctx->retry_time)) {
-            continue; /* Only send chunks which have timed out */
-        }
-
-        flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest :: Before file locked check %s", file->fsf->name);
-        /* Locked chunks are being processed, skip */
-        if (file->locked == FLB_TRUE) {
-            continue;
-        }
-
-        flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest :: Before construct_request_buffer %s", file->fsf->name);
-        ret = construct_request_buffer(ctx, NULL, file, &buffer, &buffer_size);
-        if (ret < 0) {
-            flb_plg_error(ctx->ins, "Could not construct request buffer for %s",
-                          file->fsf->name);
-            continue;
-        }
-
-        payload = flb_sds_create_len(buffer, buffer_size);
-        tag_sds = flb_sds_create(fsf->meta_buf);
-        //flb_free(buffer);
-
-        /*payload = flb_sds_create_len(buffer, buffer_size);
-        flb_free(buffer);*/
-
-        /* Compress the JSON payload */
-        if (ctx->compression_enabled == FLB_TRUE) {
-            ret = flb_gzip_compress((void *) payload, flb_sds_len(payload),
-                                    &final_payload, &final_payload_size);
-            if (ret != 0) {
-                flb_plg_error(ctx->ins,
-                              "cannot gzip payload");
-                flb_sds_destroy(payload);
-                flb_sds_destroy(tag_sds);
-                FLB_OUTPUT_RETURN(FLB_RETRY);
-            }
-            else {
-                is_compressed = FLB_TRUE;
-                flb_plg_debug(ctx->ins, "enabled payload gzip compression");
-                /* JSON buffer will be cleared at cleanup: */
-            }
-        } else {
-            final_payload = payload;
-            final_payload_size = flb_sds_len(payload);
-        }
-
-        flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest ::: tag of the file %s", tag_sds);
-
-        ret = azure_kusto_load_ingestion_resources(ctx, config);
-        if (ret != 0) {
-            flb_plg_error(ctx->ins, "cannot load ingestion resources");
-            FLB_OUTPUT_RETURN(FLB_RETRY);
-        }
-
-        flb_plg_debug(ctx->ins, "cb_azure_kusto_ingest ::: before starting kusto queued ingestion %s", file->fsf->name);
-
-        ret = azure_kusto_queued_ingestion(ctx, tag_sds, flb_sds_len(tag_sds), final_payload, final_payload_size, NULL);
-        if (ret != 0) {
-            flb_plg_error(ctx->ins, "Failed to ingest data to Azure Blob");
-            FLB_OUTPUT_RETURN(FLB_RETRY);
-        }
-
-        ret = azure_kusto_store_file_delete(ctx, file);
-        if (ret == 0) {
-            flb_plg_debug(ctx->ins, "deleted successfully ingested file %s", fsf->name);
-        }else{
-            flb_plg_error(ctx->ins, "failed to delete ingested file %s", fsf->name);
-        }
-
-        flb_free(buffer);
-        flb_sds_destroy(payload);
-        flb_sds_destroy(tag_sds);
-        if (is_compressed) {
-            flb_free(final_payload);
-        }
-    }
-    flb_plg_debug(ctx->ins, "Exited upload timer callback (cb_azure_kusto_ingest)..");
-}
-
 /* ingest data to Azure Kusto */
-static int ingest_to_kusto_ext(void *out_context, flb_sds_t new_data,
+static int ingest_to_kusto(void *out_context, flb_sds_t new_data,
                                struct azure_kusto_file *upload_file,
                                const char *tag, int tag_len)
 {
@@ -1330,7 +1257,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
             }
 
             /* ingest to kusto */
-            ret = ingest_to_kusto_ext(ctx, json, upload_file,
+            ret = ingest_to_kusto(ctx, json, upload_file,
                                       tag_name,
                                       tag_name_len);
 

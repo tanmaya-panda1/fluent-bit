@@ -72,50 +72,6 @@ flb_sds_t azb_block_blob_uri(struct flb_azure_blob *ctx, char *tag,
     return uri;
 }
 
-flb_sds_t azb_block_blob_uri_ext(struct flb_azure_blob *ctx, char *tag,
-                             char *blockid, uint64_t ms)
-{
-    int len;
-    flb_sds_t uri;
-    char *ext;
-    char *encoded_blockid;
-
-    len = strlen(blockid);
-    encoded_blockid = azb_uri_encode(blockid, len);
-    if (!encoded_blockid) {
-        return NULL;
-    }
-
-    uri = azb_uri_container(ctx);
-    if (!uri) {
-        flb_sds_destroy(encoded_blockid);
-        return NULL;
-    }
-
-    if (ctx->compress_blob == FLB_TRUE) {
-        ext = ".gz";
-    }
-    else {
-        ext = "";
-    }
-
-    if (ctx->path) {
-        flb_sds_printf(&uri, "/%s/%s.%" PRIu64 "%s?blockid=%s&comp=block",
-                       ctx->path, tag, ms, ext, encoded_blockid);
-    }
-    else {
-        flb_sds_printf(&uri, "/%s.%" PRIu64 "%s?blockid=%s&comp=block",
-                       tag, ms, ext, encoded_blockid);
-    }
-
-    if (ctx->atype == AZURE_BLOB_AUTH_SAS && ctx->sas_token) {
-        flb_sds_printf(&uri, "&%s", ctx->sas_token);
-    }
-
-    flb_sds_destroy(encoded_blockid);
-    return uri;
-}
-
 flb_sds_t azb_block_blob_uri_commit(struct flb_azure_blob *ctx,
                                     char *tag, uint64_t ms, char *str)
 {
