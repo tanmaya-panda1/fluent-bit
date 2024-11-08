@@ -1340,7 +1340,7 @@ static struct flb_config_map config_map[] = {
             offsetof(struct flb_azure_blob, unify_tag),
     "Whether to create a single buffer file when buffering mode is enabled. Default is false"
     },
-    {FLB_CONFIG_MAP_BOOL, "scheduler_max_retries", "3",0, FLB_TRUE,
+    {FLB_CONFIG_MAP_INT, "scheduler_max_retries", "3",0, FLB_TRUE,
      offsetof(struct flb_azure_blob, scheduler_max_retries),
     "Maximum number of retries for the scheduler send blob. Default is 3"
     },
