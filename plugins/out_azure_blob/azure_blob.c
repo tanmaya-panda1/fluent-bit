@@ -925,7 +925,11 @@ static int ingest_all_chunks(struct flb_azure_blob *ctx, struct flb_config *conf
                              "ingest_all_chunks :: Chunk for tag %s failed to send %i times, "
                              "will not retry",
                              (char *) fsf->meta_buf, MAX_UPLOAD_ERRORS);
-                flb_fstore_file_inactive(ctx->fs, fsf);
+                if (ctx->delete_on_max_upload_error){
+                    azure_blob_store_file_delete(ctx, chunk)
+                } else{
+                    azure_blob_store_file_inactive(ctx, chunk);
+                }
                 continue;
             }
 
@@ -1072,7 +1076,11 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
         /* Discard upload_file if it has failed to upload MAX_UPLOAD_ERRORS times */
         if (upload_file != NULL && upload_file->failures >= MAX_UPLOAD_ERRORS) {
             flb_plg_warn(ctx->ins, "File with tag %s failed to send %d times, will not retry", event_chunk->tag, MAX_UPLOAD_ERRORS);
-            azure_blob_store_file_inactive(ctx, upload_file);
+            if (ctx->delete_on_max_upload_error){
+                azure_blob_store_file_delete(ctx, upload_file);
+            }else{
+                azure_blob_store_file_inactive(ctx, upload_file);
+            }
             upload_file = NULL;
         }
 
@@ -1343,6 +1351,10 @@ static struct flb_config_map config_map[] = {
     {FLB_CONFIG_MAP_INT, "scheduler_max_retries", "3",0, FLB_TRUE,
      offsetof(struct flb_azure_blob, scheduler_max_retries),
     "Maximum number of retries for the scheduler send blob. Default is 3"
+    },
+    {FLB_CONFIG_MAP_BOOL, "delete_on_max_upload_error", "false",0, FLB_TRUE,
+     offsetof(struct flb_azure_blob, delete_on_max_upload_error),
+    "Whether to delete the buffer file on maximum upload errors. Default is false"
     },
     /* EOF */
     {0}

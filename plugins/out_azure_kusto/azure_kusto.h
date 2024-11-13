@@ -140,6 +140,7 @@ struct flb_azure_kusto {
     int unify_tag;
     int blob_uri_length;
     int scheduler_max_retries;
+    int delete_on_max_upload_error;
 
     int has_old_buffers;
     size_t store_dir_limit_size;

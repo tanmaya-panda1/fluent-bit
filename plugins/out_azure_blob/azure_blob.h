@@ -79,6 +79,7 @@ struct flb_azure_blob {
     size_t store_dir_limit_size;
     int buffer_file_delete_early;
     int blob_uri_length;
+    int delete_on_max_upload_error;
 
     int has_old_buffers;
     int scheduler_max_retries;
