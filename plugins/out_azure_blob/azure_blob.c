@@ -926,7 +926,7 @@ static int ingest_all_chunks(struct flb_azure_blob *ctx, struct flb_config *conf
                              "will not retry",
                              (char *) fsf->meta_buf, MAX_UPLOAD_ERRORS);
                 if (ctx->delete_on_max_upload_error){
-                    azure_blob_store_file_delete(ctx, chunk)
+                    azure_blob_store_file_delete(ctx, chunk);
                 } else{
                     azure_blob_store_file_inactive(ctx, chunk);
                 }
