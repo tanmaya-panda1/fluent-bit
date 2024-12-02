@@ -1534,6 +1534,10 @@ static struct flb_config_map config_map[] = {
                 offsetof(struct flb_azure_kusto, delete_on_max_upload_error),
         "Whether to delete the buffer file on maximum upload errors. Default is false"
         },
+        {FLB_CONFIG_MAP_TIME, "io_timeout", "60s",0, FLB_TRUE,
+         offsetof(struct flb_azure_kusto, io_timeout),
+        "HTTP IO timeout. Default is 60s"
+        },
         /* EOF */
         {0}};
 

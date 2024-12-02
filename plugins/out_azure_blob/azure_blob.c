@@ -195,6 +195,7 @@ static int send_blob(struct flb_config *config,
 
     if (ctx->buffering_enabled == FLB_TRUE){
         ctx->u->base.flags &= ~(FLB_IO_ASYNC);
+        ctx->u->base.net.io_timeout = ctx->io_timeout;
     }
     flb_plg_debug(ctx->ins, "send_blob -- async flag is %d", flb_stream_is_async(&ctx->u->base));
 
@@ -350,6 +351,7 @@ static int create_blob(struct flb_azure_blob *ctx, char *name)
 
     if (ctx->buffering_enabled == FLB_TRUE){
         ctx->u->base.flags &= ~(FLB_IO_ASYNC);
+        ctx->u->base.net.io_timeout = ctx->io_timeout;
     }
     flb_plg_debug(ctx->ins, "create_blob -- async flag is %d", flb_stream_is_async(&ctx->u->base));
 
@@ -425,6 +427,7 @@ static int create_container(struct flb_azure_blob *ctx, char *name)
 
     if (ctx->buffering_enabled == FLB_TRUE){
         ctx->u->base.flags &= ~(FLB_IO_ASYNC);
+        ctx->u->base.net.io_timeout = ctx->io_timeout;
     }
     flb_plg_debug(ctx->ins, "create_container -- async flag is %d", flb_stream_is_async(&ctx->u->base));
 
@@ -524,6 +527,7 @@ static int ensure_container(struct flb_azure_blob *ctx)
 
     if (ctx->buffering_enabled == FLB_TRUE){
         ctx->u->base.flags &= ~(FLB_IO_ASYNC);
+        ctx->u->base.net.io_timeout = ctx->io_timeout;
     }
     flb_plg_debug(ctx->ins, "ensure_container -- async flag is %d", flb_stream_is_async(&ctx->u->base));
 
@@ -672,6 +676,7 @@ static int send_blob_impl(struct flb_config *config,
 
     if (ctx->buffering_enabled == FLB_TRUE){
         ctx->u->base.flags &= ~(FLB_IO_ASYNC);
+        ctx->u->base.net.io_timeout = ctx->io_timeout;
     }
     flb_plg_debug(ctx->ins, "send_blob_impl -- async flag is %d", flb_stream_is_async(&ctx->u->base));
 
@@ -1355,6 +1360,10 @@ static struct flb_config_map config_map[] = {
     {FLB_CONFIG_MAP_BOOL, "delete_on_max_upload_error", "false",0, FLB_TRUE,
      offsetof(struct flb_azure_blob, delete_on_max_upload_error),
     "Whether to delete the buffer file on maximum upload errors. Default is false"
+    },
+    {FLB_CONFIG_MAP_TIME, "io_timeout", "60s",0, FLB_TRUE,
+            offsetof(struct flb_azure_blob, io_timeout),
+    "HTTP IO timeout. Default is 60s"
     },
     /* EOF */
     {0}

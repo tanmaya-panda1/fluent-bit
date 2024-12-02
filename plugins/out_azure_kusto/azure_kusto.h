@@ -91,6 +91,7 @@ struct flb_azure_kusto {
     flb_sds_t ingestion_mapping_reference;
 
     int ingestion_endpoint_connect_timeout;
+    int io_timeout;
 
     /* compress payload */
     int compression_enabled;

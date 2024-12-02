@@ -74,6 +74,7 @@ struct flb_azure_blob {
     time_t retry_time;
     int timer_created;
     int timer_ms;
+    int io_timeout;
 
     flb_sds_t azure_blob_buffer_key;
     size_t store_dir_limit_size;

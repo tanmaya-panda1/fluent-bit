@@ -159,6 +159,7 @@ int azb_block_blob_commit(struct flb_azure_blob *ctx, char *blockid, char *tag,
 
     if (ctx->buffering_enabled == FLB_TRUE){
         ctx->u->base.flags &= ~(FLB_IO_ASYNC);
+        ctx->u->base.net.io_timeout = ctx->io_timeout;
     }
     flb_plg_debug(ctx->ins, "azb_block_blob_commit -- async flag is %d", flb_stream_is_async(&ctx->u->base));
 
