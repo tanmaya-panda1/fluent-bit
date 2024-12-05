@@ -852,6 +852,7 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
     ctx->u = flb_upstream_create_url(config, ctx->ingestion_endpoint, io_flags, ins->tls);
     if (ctx->buffering_enabled ==  FLB_TRUE){
         flb_stream_disable_flags(&ctx->u->base, FLB_IO_ASYNC);
+        ctx->u->base.net.io_timeout = ctx->io_timeout;
         ctx->has_old_buffers = azure_kusto_store_has_data(ctx);
     }
     if (!ctx->u) {

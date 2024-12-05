@@ -687,6 +687,12 @@ static int send_blob_impl(struct flb_config *config,
         return FLB_RETRY;
     }
 
+    if (ctx->buffering_enabled == FLB_TRUE){
+        ctx->u->base.net.io_timeout = ctx->io_timeout;
+    }
+
+    flb_plg_info(ctx->ins, "azure_blob: value of set io_timeout is %d", u_conn->net->io_timeout);
+
     /* Create HTTP client context */
     c = flb_http_client(u_conn, FLB_HTTP_PUT, uri, payload_buf, payload_size, NULL, 0, NULL, 0);
     if (!c) {
