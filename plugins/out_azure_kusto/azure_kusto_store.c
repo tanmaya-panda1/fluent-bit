@@ -424,36 +424,6 @@ int azure_kusto_store_has_data(struct flb_azure_kusto *ctx)
     return FLB_FALSE;
 }
 
-/*
- * Check if the store has data. This function is only used on plugin
- * initialization
- */
-int azure_kusto_store_has_data_ext(struct flb_azure_kusto *ctx)
-{
-    struct mk_list *head;
-    struct flb_fstore_stream *fs_stream;
-
-    if (!ctx->fs) {
-        return FLB_FALSE;
-    }
-
-    mk_list_foreach(head, &ctx->fs->streams) {
-        /* skip multi upload stream */
-        fs_stream = mk_list_entry(head, struct flb_fstore_stream, _head);
-        if (fs_stream == ctx->stream_upload) {
-            continue;
-        }
-
-        flb_plg_debug(ctx->ins, "Stream '%s' has %d files", fs_stream->name, mk_list_size(&fs_stream->files));
-
-        if (mk_list_size(&fs_stream->files) > 0) {
-            return FLB_TRUE;
-        }
-    }
-
-    return FLB_FALSE;
-}
-
 int azure_kusto_store_has_uploads(struct flb_azure_kusto *ctx)
 {
     if (!ctx || !ctx->stream_upload) {
@@ -524,100 +494,6 @@ int azure_kusto_store_file_delete(struct flb_azure_kusto *ctx, struct azure_kust
     flb_free(azure_kusto_file);
 
     return 0;
-}
-
-int azure_kusto_store_file_delete_ext_latest(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file)
-{
-    int ret;
-    struct flb_fstore_file *fsf;
-    int fd;
-
-    fsf = azure_kusto_file->fsf;
-    if (fsf != NULL) {
-        // Check if the file exists before attempting to open it
-        if (access(azure_kusto_file->file_path, F_OK) == -1) {
-            flb_plg_warn(ctx->ins, "File does not exist");
-            //azure_kusto_file_cleanup(azure_kusto_file);
-            //flb_free(azure_kusto_file);
-            return 0;
-        }
-
-        // Open the file for locking
-        fd = open(azure_kusto_file->file_path, O_RDWR);
-        if (fd == -1) {
-            flb_plg_error(ctx->ins, "Failed to open file for locking : because it doesnt exist");
-            return 0;
-        }
-
-        // Lock the file
-        if (flock(fd, LOCK_EX | LOCK_NB) == -1) {
-            if (errno == EWOULDBLOCK) {
-                flb_plg_warn(ctx->ins, "File '%s' is locked by another process, skipping deletion", azure_kusto_file->file_path);
-                close(fd);
-                return 0;
-            } else {
-                flb_plg_error(ctx->ins, "Failed to lock file '%s': %s", azure_kusto_file->file_path, strerror(errno));
-                close(fd);
-                return -1;
-            }
-        }
-
-        ctx->current_buffer_size -= azure_kusto_file->size;
-
-        // Permanent deletion
-        ret = flb_fstore_file_delete(ctx->fs, fsf);
-        if (ret != 0) {
-            flb_plg_error(ctx->ins, "File ingested but Failed to delete file %s with size %zu", azure_kusto_file->file_path, azure_kusto_file->size);
-            ret = -1;
-        } else {
-            flb_plg_debug(ctx->ins, "File ingested and Deleted file '%s' and with size %zu", azure_kusto_file->file_path, azure_kusto_file->size);
-            ret = 0;
-        }
-
-        flb_plg_debug(ctx->ins, "Freeing memory for azure_kusto_file at address: %p", (void *)azure_kusto_file);
-        azure_kusto_file_cleanup(azure_kusto_file);
-        flb_free(azure_kusto_file);
-        azure_kusto_file = NULL; // Set pointer to NULL after freeing
-
-        // Unlock the file and close the file descriptor
-        flock(fd, LOCK_UN);
-        close(fd);
-    } else {
-        flb_plg_warn(ctx->ins, "The file might have been already deleted by another process");
-        ret = 0;
-    }
-
-    return ret;
-}
-
-int azure_kusto_store_file_delete_ext(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file)
-{
-    int ret;
-    struct flb_fstore_file *fsf;
-
-    fsf = azure_kusto_file->fsf;
-    if (fsf != NULL) {
-        ctx->current_buffer_size -= azure_kusto_file->size;
-
-        /* permanent deletion */
-        ret = flb_fstore_file_delete(ctx->fs, fsf);
-        // if successfully not deleted, release the lock
-        if (ret != 0) {
-            flb_plg_error(ctx->ins, "Failed to delete file '%s': %s", azure_kusto_file->fsf->name, strerror(errno));
-            ret = -1;
-        }else{
-            flb_plg_debug(ctx->ins, "Deleted file '%s'", azure_kusto_file->fsf->name);
-            ret = 0;
-        }
-        flb_plg_debug(ctx->ins, "Freeing memory for azure_kusto_file at address: %p", (void *)azure_kusto_file);
-        flb_free(azure_kusto_file);
-        azure_kusto_file = NULL; // Set pointer to NULL after freeing
-    } else {
-        flb_plg_warn(ctx->ins, "The file might have been already deleted by another process");
-        ret = 0;
-    }
-
-    return ret;
 }
 
 int azure_kusto_store_file_upload_read(struct flb_azure_kusto *ctx, struct flb_fstore_file *fsf,

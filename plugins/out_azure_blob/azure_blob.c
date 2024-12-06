@@ -808,13 +808,6 @@ static void cb_azure_blob_ingest(struct flb_config *config, void *data) {
                               file->fsf->name);
                 retry_count++;
 
-                /* Break if max retries reached */
-                if (retry_count >= ctx->scheduler_max_retries) {
-                    flb_plg_error(ctx->ins, "cb_azure_blob_ingest :: construct_request_buffer :: Max retries reached for file %s",
-                                  file->fsf->name);
-                    break;
-                }
-
                 /* Implement exponential backoff with jitter */
                 int jitter = rand() % backoff_time;
                 flb_plg_warn(ctx->ins, "cb_azure_blob_ingest :: failure in construct_request_buffer :: Retrying in %d seconds (attempt %d of %d) with jitter %d for file %s",
@@ -857,11 +850,6 @@ static void cb_azure_blob_ingest(struct flb_config *config, void *data) {
                 }
 
                 retry_count++;
-                if (retry_count >= ctx->scheduler_max_retries) {
-                    flb_plg_error(ctx->ins, "cb_azure_blob_ingest :: error sending blob ::Max retries reached for file %s",
-                                  file->fsf->name);
-                    break;
-                }
 
                 /* Implement exponential backoff with jitter for retry */
                 int jitter = rand() % backoff_time;
@@ -893,7 +881,13 @@ static void cb_azure_blob_ingest(struct flb_config *config, void *data) {
 
         /* Ensure file is unlocked if max retries reached */
         if (retry_count >= ctx->scheduler_max_retries) {
-            azure_blob_store_file_unlock(file);
+            flb_plg_error(ctx->ins, "cb_azure_blob_ingest :: Max retries reached for file :: attempting to delete/marking inactive %s",
+                          file->fsf->name);
+            if (ctx->delete_on_max_upload_error){
+                azure_blob_store_file_delete(ctx, file);
+            }else{
+                azure_blob_store_file_inactive(ctx, file);
+            }
         }
 
         flb_plg_debug(ctx->ins, "Exited upload timer callback (cb_azure_blob_ingest)..");
@@ -931,11 +925,11 @@ static int ingest_all_chunks(struct flb_azure_blob *ctx, struct flb_config *conf
                 continue;
             }
 
-            if (chunk->failures >= MAX_UPLOAD_ERRORS) {
+            if (chunk->failures >= ctx->scheduler_max_retries) {
                 flb_plg_warn(ctx->ins,
                              "ingest_all_chunks :: Chunk for tag %s failed to send %i times, "
                              "will not retry",
-                             (char *) fsf->meta_buf, MAX_UPLOAD_ERRORS);
+                             (char *) fsf->meta_buf, ctx->scheduler_max_retries);
                 if (ctx->delete_on_max_upload_error){
                     azure_blob_store_file_delete(ctx, chunk);
                 } else{
@@ -1084,9 +1078,9 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
         /* Get a file candidate matching the given 'tag' */
         upload_file = azure_blob_store_file_get(ctx, tag_name, tag_len);
 
-        /* Discard upload_file if it has failed to upload MAX_UPLOAD_ERRORS times */
-        if (upload_file != NULL && upload_file->failures >= MAX_UPLOAD_ERRORS) {
-            flb_plg_warn(ctx->ins, "File with tag %s failed to send %d times, will not retry", event_chunk->tag, MAX_UPLOAD_ERRORS);
+        /* Discard upload_file if it has failed to upload ctx->scheduler_max_retries times */
+        if (upload_file != NULL && upload_file->failures >= ctx->scheduler_max_retries) {
+            flb_plg_warn(ctx->ins, "File with tag %s failed to send %d times, will not retry", event_chunk->tag, ctx->scheduler_max_retries);
             if (ctx->delete_on_max_upload_error){
                 azure_blob_store_file_delete(ctx, upload_file);
             }else{

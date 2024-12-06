@@ -247,7 +247,7 @@ flb_sds_t execute_ingest_csl_command(struct flb_azure_kusto *ctx, const char *cs
     flb_plg_debug(ctx->ins, "Logging attributes of flb_azure_kusto_resources:");
     flb_plg_debug(ctx->ins, "blob_ha: %p", ctx->resources->blob_ha);
     flb_plg_debug(ctx->ins, "queue_ha: %p", ctx->resources->queue_ha);
-    flb_plg_debug(ctx->ins, "load_time: %lu", ctx->resources->load_time);
+    flb_plg_debug(ctx->ins, "load_time: %llu", ctx->resources->load_time);
 
     ctx->u->base.net.connect_timeout = ctx->ingestion_endpoint_connect_timeout;
     if (ctx->buffering_enabled == FLB_TRUE){
@@ -441,11 +441,11 @@ static int ingest_all_chunks(struct flb_azure_kusto *ctx, struct flb_config *con
                 continue;
             }
 
-            if (chunk->failures >= MAX_UPLOAD_ERRORS) {
+            if (chunk->failures >= ctx->scheduler_max_retries) {
                 flb_plg_warn(ctx->ins,
                              "ingest_all_old_buffer_files :: Chunk for tag %s failed to send %i times, "
                              "will not retry",
-                             (char *) fsf->meta_buf, MAX_UPLOAD_ERRORS);
+                             (char *) fsf->meta_buf, ctx->scheduler_max_retries);
                 if (ctx->delete_on_max_upload_error){
                     azure_kusto_store_file_delete(ctx, chunk);
                 }else{
@@ -706,8 +706,13 @@ static void cb_azure_kusto_ingest(struct flb_config *config, void *data)
 
         // If the maximum number of retries is reached, log an error and move to the next file
         if (retry_count >= ctx->scheduler_max_retries) {
-            flb_plg_error(ctx->ins, "Max retries reached for file %s", file->fsf->name);
-            azure_kusto_store_file_unlock(file); // Unlock the file for retry in the next iteration
+            flb_plg_error(ctx->ins, "scheduler_kusto_ingest :: Max retries reached for file %s", file->fsf->name);
+            //azure_kusto_store_file_unlock(file); // Unlock the file for retry in the next iteration
+            if (ctx->delete_on_max_upload_error){
+                azure_kusto_store_file_delete(ctx, file);
+            }else{
+                azure_kusto_store_file_inactive(ctx, file);
+            }
         }
     }
     // Log the end of the upload timer callback
@@ -1227,10 +1232,10 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                                                  tag_name,
                                                  tag_name_len);
 
-        /* Discard upload_file if it has failed to upload MAX_UPLOAD_ERRORS times */
-        if (upload_file != NULL && upload_file->failures >= MAX_UPLOAD_ERRORS) {
+        /* Discard upload_file if it has failed to upload ctx->scheduler_max_retries times */
+        if (upload_file != NULL && upload_file->failures >= ctx->scheduler_max_retries) {
             flb_plg_warn(ctx->ins, "File with tag %s failed to send %d times, will not "
-                                   "retry", event_chunk->tag, MAX_UPLOAD_ERRORS);
+                                   "retry", event_chunk->tag, ctx->scheduler_max_retries);
             if (ctx->delete_on_max_upload_error){
                 azure_kusto_store_file_delete(ctx, upload_file);
             }else{
@@ -1292,7 +1297,7 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                     }
                 }
             }else{
-                flb_plg_error(ctx->ins, "unable to ingest data into kusto : retrying");
+                flb_plg_error(ctx->ins, "azure_kusto:: unable to ingest data into kusto : retrying");
                 ret = FLB_RETRY;
                 if (upload_file){
                     azure_kusto_store_file_unlock(upload_file);
