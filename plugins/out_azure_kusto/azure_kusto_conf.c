@@ -17,7 +17,6 @@
  *  limitations under the License.
  */
 
-#include <fluent-bit/flb_info.h>
 #include <fluent-bit/flb_jsmn.h>
 #include <fluent-bit/flb_oauth2.h>
 #include <fluent-bit/flb_output.h>
@@ -34,11 +33,11 @@
 #include "azure_kusto.h"
 #include "azure_kusto_conf.h"
 
-// Constants for PCG random number generator
+/* Constants for PCG random number generator */
 #define PCG_DEFAULT_MULTIPLIER_64  6364136223846793005ULL
 #define PCG_DEFAULT_INCREMENT_64   1442695040888963407ULL
 
-// PCG random number generator state
+/* PCG random number generator state */
 typedef struct { uint64_t state;  uint64_t inc; } pcg32_random_t;
 
 static struct flb_upstream_node *flb_upstream_node_create_url(struct flb_azure_kusto *ctx,
@@ -171,7 +170,6 @@ static int parse_storage_resources(struct flb_azure_kusto *ctx, struct flb_confi
 {
     jsmn_parser parser;
     jsmntok_t *tokens = NULL;
-    //int tok_size = 100;
     int ret = -1;
     int i;
     int blob_count = 0;
@@ -209,7 +207,6 @@ static int parse_storage_resources(struct flb_azure_kusto *ctx, struct flb_confi
     }
 
     jsmn_init(&parser);
-    //tokens = flb_calloc(1, sizeof(jsmntok_t) * tok_size);
 
     /* Dynamically allocate memory for tokens based on response length */
     tokens = flb_calloc(1, sizeof(jsmntok_t) * (flb_sds_len(response)));
@@ -446,7 +443,7 @@ static flb_sds_t parse_ingestion_identity_token(struct flb_azure_kusto *ctx,
     return identity_token;
 }
 
-// PCG random number generator function
+/* PCG random number generator function */
 static uint32_t pcg32_random_r(pcg32_random_t* rng) {
     uint64_t oldstate = rng->state;
     rng->state = oldstate * PCG_DEFAULT_MULTIPLIER_64 + rng->inc;
@@ -463,7 +460,7 @@ static uint32_t pcg32_random_r(pcg32_random_t* rng) {
  * in kusto DM for .get ingestion resources upon expiry
  * */
 int azure_kusto_generate_random_integer() {
-    // Get environment variables or use default values
+    /* Get environment variables or use default values */
     const char *pod_id = getenv("HOSTNAME");
     const char *cluster_name = getenv("CLUSTER_NAME");
     pod_id = pod_id ? pod_id : "default_pod_id";
@@ -471,11 +468,11 @@ int azure_kusto_generate_random_integer() {
     struct flb_time tm_now;
     uint64_t now;
 
-    // Get current time with high precision
+    /* Get current time with high precision */
     flb_time_get(&tm_now);
     uint64_t current_time = flb_time_to_nanosec(&tm_now);
 
-    // Get process ID and thread ID
+    /* Get process ID and thread ID */
 #ifdef FLB_SYSTEM_WINDOWS
     unsigned long pid = GetCurrentProcessId();
     unsigned long tid = GetCurrentThreadId();
@@ -483,40 +480,40 @@ int azure_kusto_generate_random_integer() {
     unsigned long pid = getpid();
     unsigned long tid = (unsigned long)pthread_self();
 #endif
-    // Combine all sources of entropy into a single string
+    /* Combine all sources of entropy into a single string */
     char combined[1024];
     snprintf(combined, sizeof(combined), "%s%s%llu%lu%lu%p",
              pod_id, cluster_name, current_time, pid, tid, (void*)&combined);
 
-    // Generate SHA256 hash of the combined string
+    /* Generate SHA256 hash of the combined string */
     unsigned char hash[SHA256_DIGEST_LENGTH];
     SHA256((unsigned char*)combined, strlen(combined), hash);
 
-    // Generate additional entropy
+    /* Generate additional entropy */
     unsigned char entropy[32];
     if (RAND_bytes(entropy, sizeof(entropy)) != 1) {
         fprintf(stderr, "Error generating random bytes\n");
         return -1;
     }
 
-    // Generate an additional 64-bit random number
+    /* Generate an additional 64-bit random number */
     uint64_t additional_random;
     if (RAND_bytes((unsigned char*)&additional_random, sizeof(additional_random)) != 1) {
         fprintf(stderr, "Error generating additional random bytes\n");
         return -1;
     }
 
-    // XOR the hash with the additional entropy
+    /* XOR the hash with the additional entropy */
     for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
         hash[i] ^= entropy[i];
     }
 
-    // Initialize PCG random number generator
+    /* Initialize PCG random number generator */
     pcg32_random_t rng;
     rng.state = *(uint64_t*)hash ^ additional_random;  // XOR with additional random number
     rng.inc = *(uint64_t*)(hash + 8);
 
-    // Generate random value and scale it to desired range
+    /* Generate random value and scale it to desired range */
     uint32_t random_value = pcg32_random_r(&rng);
     int random_integer = (random_value % 4200001) - 600000;
 
@@ -538,7 +535,6 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
     int generated_random_integer = azure_kusto_generate_random_integer();
     flb_plg_debug(ctx->ins, "generated random integer %d", generated_random_integer);
 
-    //now = time(NULL);
     flb_time_get(&tm_now);
     now = flb_time_to_millisec(&tm_now);
     flb_plg_debug(ctx->ins, "current time %llu", now);
@@ -596,20 +592,6 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
                                     parse_ingestion_identity_token(ctx, response);
 
                             if (identity_token) {
-                                /* Ensure any previously allocated identity token is freed */
-                                /*if (ctx->resources->identity_token) {
-                                    flb_sds_destroy(ctx->resources->identity_token);
-                                    //ctx->resources->identity_token = NULL;
-                                }
-                                *//* Ensure any previously allocated blob_ha and queue_ha are freed *//*
-                                if (ctx->resources->blob_ha) {
-                                    flb_upstream_ha_destroy(ctx->resources->blob_ha);
-                                    //ctx->resources->blob_ha = NULL;
-                                }
-                                if (ctx->resources->queue_ha) {
-                                    flb_upstream_ha_destroy(ctx->resources->queue_ha);
-                                    //ctx->resources->queue_ha = NULL;
-                                }*/
                                 ctx->resources->blob_ha = blob_ha;
                                 ctx->resources->queue_ha = queue_ha;
                                 ctx->resources->identity_token = identity_token;

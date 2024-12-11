@@ -19,7 +19,6 @@
 
 #include <fluent-bit/flb_output_plugin.h>
 #include <fluent-bit/flb_sds.h>
-#include <fluent-bit/flb_kv.h>
 #include <fluent-bit/flb_utils.h>
 #include <fluent-bit/flb_pack.h>
 #include <fluent-bit/flb_config_map.h>
@@ -209,20 +208,6 @@ static int send_blob(struct flb_config *config,
         return FLB_RETRY;
     }
 
-    /* Format the data */
-    /*ret = azure_blob_format(config, i_ins,
-                            ctx, NULL,
-                            FLB_EVENT_TYPE_LOGS,
-                            tag, tag_len,
-                            data, bytes,
-                            &out_buf, &out_size);
-    if (ret != 0) {
-        flb_upstream_conn_release(u_conn);
-        flb_sds_destroy(uri);
-        flb_free(blockid);
-        return FLB_RETRY;
-    }*/
-
     /* Map buffer */
     payload_buf = data;
     payload_size = bytes;
@@ -237,7 +222,6 @@ static int send_blob(struct flb_config *config,
         else {
             compressed = FLB_TRUE;
             /* JSON buffer is not longer needed */
-            //flb_sds_destroy(out_buf);
         }
     }
 

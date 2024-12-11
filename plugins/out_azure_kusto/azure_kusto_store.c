@@ -123,7 +123,6 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
     flb_sds_t name;
     struct flb_fstore_file *fsf;
     size_t space_remaining;
-    // flb_sds_t path_sds;
 
     if (ctx->store_dir_limit_size > 0 && ctx->current_buffer_size + bytes >= ctx->store_dir_limit_size) {
         flb_plg_error(ctx->ins, "Buffer is full: current_buffer_size=%zu, new_data=%zu, store_dir_limit_size=%zu bytes",
@@ -169,36 +168,6 @@ int azure_kusto_store_buffer_put(struct flb_azure_kusto *ctx, struct azure_kusto
         azure_kusto_file->fsf = fsf;
         azure_kusto_file->create_time = time(NULL);
         azure_kusto_file->size = 0; // Initialize size to 0
-
-        /*path_sds = flb_sds_create(ctx->stream_active->path);
-        if (path_sds == NULL) {
-            flb_plg_error(ctx->ins, "failed to create path_sds");
-            flb_free(azure_kusto_file);
-            flb_fstore_file_delete(ctx->fs, fsf);
-            return -1;
-        }
-
-        // Append a slash ("/") to the path
-        path_sds = flb_sds_cat(path_sds, "/", 1);
-        if (path_sds == NULL) {
-            flb_plg_error(ctx->ins, "failed to append '/' to path_sds");
-            flb_sds_destroy(path_sds);
-            flb_free(azure_kusto_file);
-            flb_fstore_file_delete(ctx->fs, fsf);
-            return -1;
-        }
-
-        // Append the fileName to the path
-        path_sds = flb_sds_cat(path_sds, azure_kusto_file->fsf->name, flb_sds_len(azure_kusto_file->fsf->name));
-        if (path_sds == NULL) {
-            flb_plg_error(ctx->ins, "failed to append file name to path_sds");
-            flb_sds_destroy(path_sds);
-            flb_free(azure_kusto_file);
-            flb_fstore_file_delete(ctx->fs, fsf);
-            return -1;
-        }
-
-        azure_kusto_file->file_path = path_sds;*/
 
         /* Use fstore opaque 'data' reference to keep our context */
         fsf->data = azure_kusto_file;
@@ -365,7 +334,6 @@ int azure_kusto_store_exit(struct flb_azure_kusto *ctx)
             fsf = mk_list_entry(f_head, struct flb_fstore_file, _head);
             if (fsf->data != NULL) {
                 azure_kusto_file = fsf->data;
-                //flb_sds_destroy(azure_kusto_file->file_path);
                 flb_free(azure_kusto_file);
             }
         }
@@ -382,30 +350,30 @@ int azure_kusto_store_has_data(struct flb_azure_kusto *ctx)
     struct mk_list *head;
     struct flb_fstore_stream *fs_stream;
 
-    // Check if the file storage context is initialized
+    /* Check if the file storage context is initialized */
     if (!ctx->fs) {
         flb_plg_debug(ctx->ins, "File storage context is not initialized");
         return FLB_FALSE;
     }
 
-    // Iterate over each stream in the file storage
+    /* Iterate over each stream in the file storage */
     mk_list_foreach(head, &ctx->fs->streams) {
         fs_stream = mk_list_entry(head, struct flb_fstore_stream, _head);
 
-        // Log the name of the current stream being processed
+        /* Log the name of the current stream being processed */
         flb_plg_debug(ctx->ins, "Processing stream: '%s'", fs_stream->name);
 
-        // Check if the current stream is the one used for uploads
+        /* Check if the current stream is the one used for uploads */
         if (fs_stream == ctx->stream_upload) {
             flb_plg_debug(ctx->ins, "Skipping upload stream: '%s'", fs_stream->name);
             continue;
         }
 
-        // Log the number of files in the current stream
+        /* Log the number of files in the current stream */
         int file_count = mk_list_size(&fs_stream->files);
         flb_plg_debug(ctx->ins, "Stream '%s' has %d files", fs_stream->name, file_count);
 
-        // If there are files, log their names and return true
+        /* If there are files, log their names and return true */
         if (file_count > 0) {
             struct mk_list *file_head;
             struct flb_fstore_file *fs_file;
@@ -419,7 +387,7 @@ int azure_kusto_store_has_data(struct flb_azure_kusto *ctx)
         }
     }
 
-    // Log if no data was found in any stream
+    /* Log if no data was found in any stream */
     flb_plg_debug(ctx->ins, "No data found in any stream");
     return FLB_FALSE;
 }
@@ -448,25 +416,6 @@ int azure_kusto_store_file_inactive(struct flb_azure_kusto *ctx, struct azure_ku
     ret = flb_fstore_file_inactive(ctx->fs, fsf);
 
     return ret;
-}
-
-void azure_kusto_file_cleanup(struct azure_kusto_file *file)
-{
-    if (file == NULL) {
-        return;
-    }
-
-    // Free the file path if it was dynamically allocated
-    /*if (file->file_path != NULL) {
-        flb_sds_destroy(file->file_path);
-        file->file_path = NULL;
-    }*/
-
-    // If there are other dynamically allocated members, free them here
-    // For now, we only free file_path as per the given struct
-
-    // Free the azure_kusto_file itself
-    //flb_free(file);
 }
 
 int azure_kusto_store_file_cleanup(struct flb_azure_kusto *ctx, struct azure_kusto_file *azure_kusto_file)

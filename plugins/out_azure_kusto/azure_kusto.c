@@ -467,9 +467,6 @@ static int ingest_all_chunks(struct flb_azure_kusto *ctx, struct flb_config *con
             tag_sds = flb_sds_create(fsf->meta_buf);
             flb_free(buffer);
 
-            /*payload = flb_sds_create_len(buffer, buffer_size);
-            flb_free(buffer);*/
-
             /* Compress the JSON payload */
             if (ctx->compression_enabled == FLB_TRUE) {
                 ret = flb_gzip_compress((void *) payload, flb_sds_len(payload),
@@ -849,7 +846,6 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
     pthread_mutex_init(&ctx->token_mutex, NULL);
     pthread_mutex_init(&ctx->resources_mutex, NULL);
     pthread_mutex_init(&ctx->blob_mutex, NULL);
-    //pthread_mutex_init(&ctx->buffer_mutex, NULL);
 
     /*
      * Create upstream context for Kusto Ingestion endpoint
@@ -888,110 +884,6 @@ static int cb_azure_kusto_init(struct flb_output_instance *ins, struct flb_confi
     flb_output_upstream_set(ctx->u, ins);
 
     flb_plg_debug(ctx->ins, "azure kusto init completed");
-
-    return 0;
-}
-
-static int azure_kusto_format_ext(struct flb_azure_kusto *ctx, const char *tag, int tag_len,
-                                  const void *data, size_t bytes, void **out_data,
-                                  size_t *out_size)
-{
-    int records = 0;
-    msgpack_sbuffer mp_sbuf;
-    msgpack_packer mp_pck;
-    /* for sub msgpack objs */
-    int map_size;
-    struct tm tms;
-    char time_formatted[32];
-    size_t s;
-    int len;
-    struct flb_log_event_decoder log_decoder;
-    struct flb_log_event         log_event;
-    int                          ret;
-    /* output buffer */
-    flb_sds_t out_buf;
-
-    /* Create array for all records */
-    records = flb_mp_count(data, bytes);
-    if (records <= 0) {
-        flb_plg_error(ctx->ins, "error counting msgpack entries");
-        return -1;
-    }
-
-    ret = flb_log_event_decoder_init(&log_decoder, (char *) data, bytes);
-
-    if (ret != FLB_EVENT_DECODER_SUCCESS) {
-        flb_plg_error(ctx->ins,
-                      "Log event decoder initialization error : %d", ret);
-
-        return -1;
-    }
-
-    /* Create temporary msgpack buffer */
-    msgpack_sbuffer_init(&mp_sbuf);
-    msgpack_packer_init(&mp_pck, &mp_sbuf, msgpack_sbuffer_write);
-
-    msgpack_pack_array(&mp_pck, records);
-
-    while ((ret = flb_log_event_decoder_next(
-            &log_decoder,
-            &log_event)) == FLB_EVENT_DECODER_SUCCESS) {
-        map_size = 1;
-        if (ctx->include_time_key == FLB_TRUE) {
-            map_size++;
-        }
-
-        if (ctx->include_tag_key == FLB_TRUE) {
-            map_size++;
-        }
-
-        msgpack_pack_map(&mp_pck, map_size);
-
-        /* include_time_key */
-        if (ctx->include_time_key == FLB_TRUE) {
-            msgpack_pack_str(&mp_pck, flb_sds_len(ctx->time_key));
-            msgpack_pack_str_body(&mp_pck, ctx->time_key, flb_sds_len(ctx->time_key));
-
-            /* Append the time value as ISO 8601 */
-            gmtime_r(&log_event.timestamp.tm.tv_sec, &tms);
-            s = strftime(time_formatted, sizeof(time_formatted) - 1,
-                         FLB_PACK_JSON_DATE_ISO8601_FMT, &tms);
-
-            len = snprintf(time_formatted + s, sizeof(time_formatted) - 1 - s,
-                           ".%03" PRIu64 "Z",
-                    (uint64_t)log_event.timestamp.tm.tv_nsec / 1000000);
-            s += len;
-            msgpack_pack_str(&mp_pck, s);
-            msgpack_pack_str_body(&mp_pck, time_formatted, s);
-        }
-
-        /* include_tag_key */
-        if (ctx->include_tag_key == FLB_TRUE) {
-            msgpack_pack_str(&mp_pck, flb_sds_len(ctx->tag_key));
-            msgpack_pack_str_body(&mp_pck, ctx->tag_key, flb_sds_len(ctx->tag_key));
-            msgpack_pack_str(&mp_pck, tag_len);
-            msgpack_pack_str_body(&mp_pck, tag, tag_len);
-        }
-
-        msgpack_pack_str(&mp_pck, flb_sds_len(ctx->log_key));
-        msgpack_pack_str_body(&mp_pck, ctx->log_key, flb_sds_len(ctx->log_key));
-        msgpack_pack_object(&mp_pck, *log_event.body);
-    }
-
-    /* Convert from msgpack to JSON */
-    out_buf = flb_msgpack_raw_to_json_sds(mp_sbuf.data, mp_sbuf.size);
-
-    /* Cleanup */
-    flb_log_event_decoder_destroy(&log_decoder);
-    msgpack_sbuffer_destroy(&mp_sbuf);
-
-    if (!out_buf) {
-        flb_plg_error(ctx->ins, "error formatting JSON payload");
-        return -1;
-    }
-
-    *out_data = out_buf;
-    *out_size = flb_sds_len(out_buf);
 
     return 0;
 }
@@ -1433,7 +1325,6 @@ static int cb_azure_kusto_exit(void *data, struct flb_config *config)
     pthread_mutex_destroy(&ctx->resources_mutex);
     pthread_mutex_destroy(&ctx->token_mutex);
     pthread_mutex_destroy(&ctx->blob_mutex);
-    //pthread_mutex_destroy(&ctx->buffer_mutex);
 
     azure_kusto_store_exit(ctx);
 

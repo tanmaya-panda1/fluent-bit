@@ -17,11 +17,9 @@
  *  limitations under the License.
  */
 
-#include <fluent-bit/flb_output_plugin.h>
 #include <fluent-bit/flb_sds.h>
 
 #include "azure_blob.h"
-#include "azure_blob_conf.h"
 #include "azure_blob_uri.h"
 
 flb_sds_t azb_append_blob_uri(struct flb_azure_blob *ctx, char *tag)
