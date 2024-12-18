@@ -1094,6 +1094,7 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
             if (ret == FLB_FALSE) {
                 flb_plg_error(ctx->ins, "cannot ensure container '%s' exists",
                               ctx->container_name);
+                upload_file->failures += 1;
                 FLB_OUTPUT_RETURN(FLB_RETRY);
             }
 
@@ -1102,6 +1103,7 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
             if (ret != 0) {
                 flb_plg_error(ctx->ins, "error constructing request buffer for %s", event_chunk->tag);
                 flb_sds_destroy(json);
+                upload_file->failures += 1;
                 FLB_OUTPUT_RETURN(FLB_RETRY);
             }
 
@@ -1121,6 +1123,10 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
                 goto cleanup;
             } else {
                 flb_plg_error(ctx->ins, "error uploading file %s", upload_file->fsf->name);
+                if (upload_file){
+                    azure_blob_store_file_unlock(upload_file);
+                    upload_file->failures += 1;
+                }
                 goto error;
             }
         } else {
