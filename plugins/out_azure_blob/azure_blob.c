@@ -1553,10 +1553,10 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
                 *
                 * https://learn.microsoft.com/en-us/azure/storage/blobs/storage-blob-container-create#about-container-naming
                 */
-                ret = ensure_container(ctx);
+                /*ret = ensure_container(ctx);
                 if (ret == FLB_FALSE) {
                     FLB_OUTPUT_RETURN(FLB_RETRY);
-                }
+                }*/
 
                 /* Upload the file */
                 ret = send_blob(config, i_ins, ctx, FLB_EVENT_TYPE_LOGS, ctx->btype,(char *)tag_name, 0, (char *)tag_name, tag_len, final_payload, final_payload_size);
