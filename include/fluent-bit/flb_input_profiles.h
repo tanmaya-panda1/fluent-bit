@@ -17,14 +17,20 @@
  *  limitations under the License.
  */
 
-#ifndef FLB_INPUT_EVENT_H
-#define FLB_INPUT_EVENT_H
+#ifndef FLB_INPUT_PROFILES_H
+#define FLB_INPUT_PROFILES_H
 
-/* support event types by input plugins */
-#define FLB_INPUT_LOGS        0
-#define FLB_INPUT_METRICS     1
-#define FLB_INPUT_TRACES      2
-#define FLB_INPUT_BLOBS       3
-#define FLB_INPUT_PROFILES    4
+#include <fluent-bit/flb_info.h>
+#include <cprofiles/cprofiles.h>
+
+int flb_input_profiles_append(struct flb_input_instance *ins,
+                              const char *tag, size_t tag_len,
+                              struct cprof *profiles_context);
+
+int flb_input_profiles_append_skip_processor_stages(
+        struct flb_input_instance *ins,
+        size_t processor_starting_stage,
+        const char *tag, size_t tag_len,
+        struct cprof *profiles_context);
 
 #endif

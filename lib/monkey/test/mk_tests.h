@@ -1,8 +1,6 @@
-/* -*- Mode: C; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-
-/*  Fluent Bit
- *  ==========
- *  Copyright (C) 2015-2024 The Fluent Bit Authors
+/*  Monkey HTTP Server
+ *  ==================
+ *  Copyright 2001-2015 Monkey Software LLC <eduardo@monkey.io>
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,14 +15,9 @@
  *  limitations under the License.
  */
 
-#ifndef FLB_INPUT_EVENT_H
-#define FLB_INPUT_EVENT_H
+#ifndef MK_TESTS_H
+#define MK_TESTS_H
 
-/* support event types by input plugins */
-#define FLB_INPUT_LOGS        0
-#define FLB_INPUT_METRICS     1
-#define FLB_INPUT_TRACES      2
-#define FLB_INPUT_BLOBS       3
-#define FLB_INPUT_PROFILES    4
+#include "lib/acutest/acutest.h"
 
 #endif
