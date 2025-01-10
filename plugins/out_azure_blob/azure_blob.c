@@ -654,12 +654,13 @@ static int ensure_container(struct flb_azure_blob *ctx)
     uri = azb_uri_ensure_or_create_container(ctx);
     if (!uri) {
         flb_plg_error(ctx->ins, "cannot create container URI");
-        return FLB_FALSE;
+        return FLB_FALSE; 
     }
 
     if (ctx->buffering_enabled == FLB_TRUE){
         ctx->u->base.flags &= ~(FLB_IO_ASYNC);
         ctx->u->base.net.io_timeout = ctx->io_timeout;
+        flb_stream_disable_async_mode(&u_conn->base);
     }
     flb_plg_debug(ctx->ins, "ensure_container -- async flag is %d", flb_stream_is_async(&ctx->u->base));
 
@@ -1553,10 +1554,10 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
                 *
                 * https://learn.microsoft.com/en-us/azure/storage/blobs/storage-blob-container-create#about-container-naming
                 */
-                /*ret = ensure_container(ctx);
+                ret = ensure_container(ctx);
                 if (ret == FLB_FALSE) {
                     FLB_OUTPUT_RETURN(FLB_RETRY);
-                }*/
+                }
 
                 /* Upload the file */
                 ret = send_blob(config, i_ins, ctx, FLB_EVENT_TYPE_LOGS, ctx->btype,(char *)tag_name, 0, (char *)tag_name, tag_len, final_payload, final_payload_size);
