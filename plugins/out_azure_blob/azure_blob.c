@@ -1686,19 +1686,21 @@ static int cb_azure_blob_exit(void *data, struct flb_config *config)
         return 0;
     }
 
-    if (azure_blob_store_has_data(ctx) == FLB_TRUE) {
-        flb_plg_info(ctx->ins, "Sending all locally buffered data to Azure Blob");
-        ret = ingest_all_chunks(ctx, config);
-        if (ret < 0) {
-            flb_plg_error(ctx->ins, "Could not send all chunks on exit");
+    if (ctx->buffering_enabled == FLB_TRUE){
+        if (azure_blob_store_has_data(ctx) == FLB_TRUE) {
+            flb_plg_info(ctx->ins, "Sending all locally buffered data to Azure Blob");
+            ret = ingest_all_chunks(ctx, config);
+            if (ret < 0) {
+                flb_plg_error(ctx->ins, "Could not send all chunks on exit");
+            }
         }
+        azure_blob_store_exit(ctx);
     }
 
     if (ctx->u) {
         flb_upstream_destroy(ctx->u);
         ctx->u = NULL;
     }
-    azure_blob_store_exit(ctx);
 
     flb_azure_blob_conf_destroy(ctx);
     return 0;

@@ -292,7 +292,7 @@ int azb_block_blob_put_block_list(struct flb_azure_blob *ctx, flb_sds_t uri, flb
 
     /* Validate HTTP status */
     if (ret == -1) {
-        flb_plg_error(ctx->ins, "error sending append_blob");
+        flb_plg_error(ctx->ins, "error sending block_blob");
         return FLB_RETRY;
     }
 
