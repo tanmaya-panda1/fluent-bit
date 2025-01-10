@@ -660,7 +660,6 @@ static int ensure_container(struct flb_azure_blob *ctx)
     if (ctx->buffering_enabled == FLB_TRUE){
         ctx->u->base.flags &= ~(FLB_IO_ASYNC);
         ctx->u->base.net.io_timeout = ctx->io_timeout;
-        flb_stream_disable_async_mode(&u_conn->base);
     }
     flb_plg_debug(ctx->ins, "ensure_container -- async flag is %d", flb_stream_is_async(&ctx->u->base));
 
@@ -1642,7 +1641,7 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
                             (char *) event_chunk->tag,  /* use tag as 'name' */
                             0,  /* part id */
                             (char *) event_chunk->tag, flb_sds_len(event_chunk->tag),
-                            (char *) event_chunk->data, event_chunk->size);
+                            json, json_size);
 
             if (ret == CREATE_BLOB) {
                 ret = create_blob(ctx, event_chunk->tag);
@@ -1654,7 +1653,7 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
                                     0,  /* part id */
                                     (char *) event_chunk->tag,  /* use tag as 'name' */
                                     flb_sds_len(event_chunk->tag),
-                                    (char *) event_chunk->data, event_chunk->size);
+                                    json, json_size);
                 }
             }
         }
@@ -1668,6 +1667,10 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
         if (ret == -1) {
             FLB_OUTPUT_RETURN(FLB_RETRY);
         }
+    }
+
+    if (json){
+        flb_sds_destroy(json);
     }
 
     /* FLB_RETRY, FLB_OK, FLB_ERROR */
