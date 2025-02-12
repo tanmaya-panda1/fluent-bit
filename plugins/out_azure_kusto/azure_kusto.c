@@ -343,6 +343,21 @@ flb_sds_t execute_ingest_csl_command(struct flb_azure_kusto *ctx, const char *cs
     flb_plg_debug(ctx->ins, "queue_ha: %p", ctx->resources->queue_ha);
     flb_plg_debug(ctx->ins, "load_time: %llu", ctx->resources->load_time);
 
+    /* Ensure ctx->u (upstream) is valid */
+    if (!ctx->u) {
+        flb_plg_error(ctx->ins, "execute_ingest_csl_command: ctx->u (upstream) is NULL");
+        return NULL;
+    }
+
+    /* Check if TLS is enabled and ensure TLS context is not NULL */
+    if (ctx->u->base.flags & FLB_IO_TLS) {
+        if (!ctx->u->base.tls_context) {  // Correct TLS context access
+            flb_plg_error(ctx->ins, "execute_ingest_csl_command: TLS is enabled but base.tls_context is NULL");
+            return NULL;
+        }
+        flb_plg_debug(ctx->ins, "TLS is enabled and TLS context is valid");
+    }
+
     ctx->u->base.net.connect_timeout = ctx->ingestion_endpoint_connect_timeout;
     if (ctx->buffering_enabled == FLB_TRUE){
         ctx->u->base.flags &= ~(FLB_IO_ASYNC);
