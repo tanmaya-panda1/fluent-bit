@@ -67,12 +67,15 @@ static struct flb_condition_rule *rule_create(const char *field,
     case FLB_RULE_OP_EQ:
     case FLB_RULE_OP_NEQ:
     case FLB_RULE_OP_REGEX:
+    case FLB_RULE_OP_NOT_REGEX:
         if (!value || !((char *)value)[0]) {
             return NULL;
         }
         break;
     case FLB_RULE_OP_GT:
     case FLB_RULE_OP_LT:
+    case FLB_RULE_OP_GTE:
+    case FLB_RULE_OP_LTE:
         if (!value) {
             return NULL;
         }
@@ -122,10 +125,13 @@ static struct flb_condition_rule *rule_create(const char *field,
 
     case FLB_RULE_OP_GT:
     case FLB_RULE_OP_LT:
+    case FLB_RULE_OP_GTE:
+    case FLB_RULE_OP_LTE:
         rule->value.num_val = *(double *)value;
         break;
 
     case FLB_RULE_OP_REGEX:
+    case FLB_RULE_OP_NOT_REGEX:
         rule->regex = flb_regex_create((char *)value);
         if (!rule->regex) {
             flb_cfl_ra_destroy(rule->ra);
@@ -183,6 +189,7 @@ static void rule_destroy(struct flb_condition_rule *rule)
         break;
 
     case FLB_RULE_OP_REGEX:
+    case FLB_RULE_OP_NOT_REGEX:
         if (rule->regex) {
             flb_regex_destroy(rule->regex);
         }
@@ -198,6 +205,8 @@ static void rule_destroy(struct flb_condition_rule *rule)
 
     case FLB_RULE_OP_GT:
     case FLB_RULE_OP_LT:
+    case FLB_RULE_OP_GTE:
+    case FLB_RULE_OP_LTE:
         break;
 
     default:
@@ -300,10 +309,26 @@ static int evaluate_rule(struct flb_condition_rule *rule,
         result = (num_val < rule->value.num_val);
         break;
 
+    case FLB_RULE_OP_GTE:
+        num_val = atof(str_val);
+        result = (num_val >= rule->value.num_val);
+        break;
+
+    case FLB_RULE_OP_LTE:
+        num_val = atof(str_val);
+        result = (num_val <= rule->value.num_val);
+        break;
+
     case FLB_RULE_OP_REGEX:
         result = (flb_regex_match(rule->regex,
                                   (unsigned char *)str_val,
                                   flb_sds_len(str_val)) > 0);
+        break;
+
+    case FLB_RULE_OP_NOT_REGEX:
+        result = (flb_regex_match(rule->regex,
+                                  (unsigned char *)str_val,
+                                  flb_sds_len(str_val)) <= 0);
         break;
 
     case FLB_RULE_OP_IN:
