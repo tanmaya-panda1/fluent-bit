@@ -39,6 +39,16 @@ static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
     /* Clear any previous oauth2 payload content */
     flb_oauth2_payload_clear(ctx->o);
 
+    /* If using workload identity, handle token exchange */
+    if (ctx->auth_type == FLB_AZURE_KUSTO_AUTH_WORKLOAD_IDENTITY) {
+        ret = flb_azure_workload_identity_token_get(ctx->o, ctx->workload_identity_token_file);
+        if (ret == -1) {
+            flb_plg_error(ctx->ins, "error retrieving workload identity token");
+            return -1;
+        }
+        return 0;
+    }
+
     ret = flb_oauth2_payload_append(ctx->o, "grant_type", 10, "client_credentials", 18);
     if (ret == -1) {
         flb_plg_error(ctx->ins, "error appending oauth2 params");
@@ -84,7 +94,19 @@ flb_sds_t get_azure_kusto_token(struct flb_azure_kusto *ctx)
     }
 
     if (flb_oauth2_token_expired(ctx->o) == FLB_TRUE) {
+<<<<<<< Updated upstream
         ret = azure_kusto_get_oauth2_token(ctx);
+=======
+        if (ctx->auth_type == FLB_AZURE_KUSTO_AUTH_WORKLOAD_IDENTITY) {
+            ret = azure_kusto_get_oauth2_token(ctx);
+        }
+        else if (ctx->managed_identity_client_id != NULL) {
+            ret = azure_kusto_get_msi_token(ctx);
+        }
+        else {
+            ret = azure_kusto_get_oauth2_token(ctx);
+        }
+>>>>>>> Stashed changes
     }
 
     /* Copy string to prevent race conditions (get_oauth2 can free the string) */
@@ -524,7 +546,67 @@ static struct flb_config_map config_map[] = {
      offsetof(struct flb_azure_kusto, ingestion_resources_refresh_interval),
     "Set the azure kusto ingestion resources refresh interval"
     "The default is 3600 seconds."},
+<<<<<<< Updated upstream
         /* EOF */
+=======
+    {FLB_CONFIG_MAP_BOOL, "buffering_enabled", "false", 0, FLB_TRUE,
+     offsetof(struct flb_azure_kusto, buffering_enabled), "Enable buffering into disk before ingesting into Azure Kusto."
+    },
+    {FLB_CONFIG_MAP_STR, "buffer_dir", "/tmp/fluent-bit/azure-kusto/", 0, FLB_TRUE,
+     offsetof(struct flb_azure_kusto, buffer_dir), "Specifies the location of directory where the buffered data will be stored."
+    },
+    {FLB_CONFIG_MAP_TIME, "upload_timeout", "30m",
+     0, FLB_TRUE, offsetof(struct flb_azure_kusto, upload_timeout),
+    "Optionally specify a timeout for uploads. "
+    "Fluent Bit will start ingesting buffer files which have been created more than x minutes and haven't reached upload_file_size limit yet.  "
+    " Default is 30m."
+    },
+    {FLB_CONFIG_MAP_SIZE, "upload_file_size", "200M",
+     0, FLB_TRUE, offsetof(struct flb_azure_kusto, file_size),
+    "Specifies the size of files to be uploaded in MBs. Default is 200MB"
+    },
+    {FLB_CONFIG_MAP_STR, "azure_kusto_buffer_key", "key",0, FLB_TRUE,
+     offsetof(struct flb_azure_kusto, azure_kusto_buffer_key),
+    "Set the azure kusto buffer key which needs to be specified when using multiple instances of azure kusto output plugin and buffering is enabled"
+    },
+    {FLB_CONFIG_MAP_SIZE, "store_dir_limit_size", FLB_AZURE_KUSTO_BUFFER_DIR_MAX_SIZE,0, FLB_TRUE,
+     offsetof(struct flb_azure_kusto, store_dir_limit_size),
+    "Set the max size of the buffer directory. Default is 8GB"
+    },
+    {FLB_CONFIG_MAP_BOOL, "buffer_file_delete_early", "false",0, FLB_TRUE,
+     offsetof(struct flb_azure_kusto, buffer_file_delete_early),
+    "Whether to delete the buffered file early after successful blob creation. Default is false"
+    },
+    {FLB_CONFIG_MAP_BOOL, "unify_tag", "true",0, FLB_TRUE,
+     offsetof(struct flb_azure_kusto, unify_tag),
+    "This creates a single buffer file when the buffering mode is ON. Default is true"
+    },
+    {FLB_CONFIG_MAP_INT, "blob_uri_length", "64",0, FLB_TRUE,
+     offsetof(struct flb_azure_kusto, blob_uri_length),
+    "Set the length of generated blob uri before ingesting to kusto. Default is 64"
+    },
+    {FLB_CONFIG_MAP_INT, "scheduler_max_retries", "3",0, FLB_TRUE,
+     offsetof(struct flb_azure_kusto, scheduler_max_retries),
+    "Set the maximum number of retries for ingestion using the scheduler. Default is 3"
+    },
+    {FLB_CONFIG_MAP_BOOL, "delete_on_max_upload_error", "false",0, FLB_TRUE,
+     offsetof(struct flb_azure_kusto, delete_on_max_upload_error),
+    "Whether to delete the buffer file on maximum upload errors. Default is false"
+    },
+    {FLB_CONFIG_MAP_TIME, "io_timeout", "60s",0, FLB_TRUE,
+     offsetof(struct flb_azure_kusto, io_timeout),
+    "HTTP IO timeout. Default is 60s"
+    },
+    {FLB_CONFIG_MAP_STR, "auth_type", "service_principal", 0, FLB_TRUE,
+     offsetof(struct flb_azure_kusto, auth_type_str),
+    "Authentication type: 'service_principal', 'managed_identity', or 'workload_identity'"
+    },
+    {FLB_CONFIG_MAP_STR, "workload_identity_token_file", NULL, 0, FLB_TRUE,
+        offsetof(struct flb_azure_kusto, workload_identity_token_file),
+        "Path to the workload identity token file (default: /var/run/secrets/azure/tokens/azure-identity-token)"
+    },
+    /* EOF */
+>>>>>>> Stashed changes
     {0}};
 
 struct flb_output_plugin out_azure_kusto_plugin = {
