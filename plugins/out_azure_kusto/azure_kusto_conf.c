@@ -808,7 +808,7 @@ struct flb_azure_kusto *flb_azure_kusto_conf_create(struct flb_output_instance *
     }
 
     /* Create oauth2 context */
-    if (ctx->auth_type == FLB_AZURE_KUSTO_AUTH_SERVICE_PRINCIPAL) {
+    if (ctx->auth_type == FLB_AZURE_KUSTO_AUTH_SERVICE_PRINCIPAL || ctx->auth_type == FLB_AZURE_KUSTO_AUTH_WORKLOAD_IDENTITY) {
         /* Standard OAuth2 for service principal */
         ctx->oauth_url = flb_sds_create_size(sizeof(FLB_MSAL_AUTH_URL_TEMPLATE) - 1 +
                                             flb_sds_len(ctx->tenant_id));
@@ -819,12 +819,6 @@ struct flb_azure_kusto *flb_azure_kusto_conf_create(struct flb_output_instance *
         }
         flb_sds_snprintf(&ctx->oauth_url, flb_sds_alloc(ctx->oauth_url),
                          FLB_MSAL_AUTH_URL_TEMPLATE, ctx->tenant_id);
-    }
-    else if (ctx->auth_type == FLB_AZURE_KUSTO_AUTH_WORKLOAD_IDENTITY) {
-        /* OAuth2 for workload identity */
-        snprintf(oauth_url, sizeof(oauth_url) - 1,
-                 FLB_MSAL_AUTH_URL_TEMPLATE, ctx->tenant_id);
-        ctx->oauth_url = flb_sds_create(oauth_url);
     }
     else if ctx->auth_type == FLB_AZURE_KUSTO_AUTH_MANAGED_IDENTITY {
         /* MSI auth */
