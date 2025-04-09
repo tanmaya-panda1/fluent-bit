@@ -144,7 +144,6 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
     struct flb_connection *u_conn;
     struct flb_http_client *c;
     flb_sds_t federated_token;
-    char *tenant_id;
     
     /* Default token file location if not specified */
     if (!token_file) {
