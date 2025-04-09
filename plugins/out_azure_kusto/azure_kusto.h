@@ -176,6 +176,6 @@ struct flb_azure_kusto {
 flb_sds_t get_azure_kusto_token(struct flb_azure_kusto *ctx);
 flb_sds_t execute_ingest_csl_command(struct flb_azure_kusto *ctx, const char *csl);
 /* Add function prototype for workload identity token exchange */
-int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *token_file);
+int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *token_file, const char *client_id, const char *tenant_id);
 
 #endif

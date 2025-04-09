@@ -103,7 +103,7 @@ char *flb_azure_msiauth_token_get(struct flb_oauth2 *ctx)
      return NULL;
  }
 
- * Read token from file */
+/** Read token from file */
 static flb_sds_t read_token_from_file(const char *token_file)
 {
     FILE *fp;
@@ -137,7 +137,7 @@ static flb_sds_t read_token_from_file(const char *token_file)
 }
 
 /* Exchange federated token for an access token */
-int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *token_file)
+int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *token_file, const char *client_id, const char *tenant_id)
 {
     int ret;
     size_t b_sent;
@@ -166,16 +166,6 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
         return -1;
     }
     
-    /* Extract tenant ID from the OAuth2 URI */
-    tenant_id = strstr(ctx->uri, "tenant_id=");
-    if (!tenant_id) {
-        flb_error("[azure workload identity] tenant_id not found in OAuth2 URI");
-        flb_upstream_conn_release(u_conn);
-        flb_sds_destroy(federated_token);
-        return -1;
-    }
-    tenant_id += 10; /* Skip "tenant_id=" */
-    
     /* Create HTTP client context */
     c = flb_http_client(u_conn, FLB_HTTP_POST, ctx->uri,
                        NULL, 0, ctx->host, atoi(ctx->port), NULL, 0);
@@ -193,7 +183,7 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
     flb_http_buffer_size(c, 4096);
     
     ret = flb_http_buffer_append(c, "client_id=", 10);
-    ret |= flb_http_buffer_append(c, ctx->client_id, strlen(ctx->client_id));
+    ret |= flb_http_buffer_append(c, client_id, strlen(client_id));
     
     ret |= flb_http_buffer_append(c, "&grant_type=urn:ietf:params:oauth:grant-type:token-exchange", 59);
     

@@ -63,7 +63,7 @@ static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
 
     /* If using workload identity, handle token exchange */
     if (ctx->auth_type == FLB_AZURE_KUSTO_AUTH_WORKLOAD_IDENTITY) {
-        ret = flb_azure_workload_identity_token_get(ctx->o, ctx->workload_identity_token_file);
+        ret = flb_azure_workload_identity_token_get(ctx->o, ctx->workload_identity_token_file, ctx->client_id, ctx->tenant_id);
         if (ret == -1) {
             flb_plg_error(ctx->ins, "error retrieving workload identity token");
             return -1;
