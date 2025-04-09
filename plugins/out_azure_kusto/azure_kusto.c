@@ -61,6 +61,16 @@ static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
     /* Clear any previous oauth2 payload content */
     flb_oauth2_payload_clear(ctx->o);
 
+    /* If using workload identity, handle token exchange */
+    if (ctx->auth_type == FLB_AZURE_KUSTO_AUTH_WORKLOAD_IDENTITY) {
+        ret = flb_azure_workload_identity_token_get(ctx->o, ctx->workload_identity_token_file);
+        if (ret == -1) {
+            flb_plg_error(ctx->ins, "error retrieving workload identity token");
+            return -1;
+        }
+        return 0;
+    }
+
     ret = flb_oauth2_payload_append(ctx->o, "grant_type", 10, "client_credentials", 18);
     if (ret == -1) {
         flb_plg_error(ctx->ins, "error appending oauth2 params");
@@ -107,7 +117,10 @@ flb_sds_t get_azure_kusto_token(struct flb_azure_kusto *ctx)
     }
 
     if (flb_oauth2_token_expired(ctx->o) == FLB_TRUE) {
-        if (ctx->managed_identity_client_id != NULL) {
+        if (ctx->auth_type == FLB_AZURE_KUSTO_AUTH_WORKLOAD_IDENTITY) {
+            ret = azure_kusto_get_oauth2_token(ctx);
+        }
+        else if (ctx->managed_identity_client_id != NULL) {
             ret = azure_kusto_get_msi_token(ctx);
         }
         else {
@@ -1570,6 +1583,14 @@ static struct flb_config_map config_map[] = {
     {FLB_CONFIG_MAP_TIME, "io_timeout", "60s",0, FLB_TRUE,
      offsetof(struct flb_azure_kusto, io_timeout),
     "HTTP IO timeout. Default is 60s"
+    },
+    {FLB_CONFIG_MAP_STR, "auth_type", "service_principal", 0, FLB_TRUE,
+     offsetof(struct flb_azure_kusto, auth_type_str),
+    "Authentication type: 'service_principal', 'managed_identity', or 'workload_identity'"
+    },
+    {FLB_CONFIG_MAP_STR, "workload_identity_token_file", NULL, 0, FLB_TRUE,
+        offsetof(struct flb_azure_kusto, workload_identity_token_file),
+        "Path to the workload identity token file (default: /var/run/secrets/azure/tokens/azure-identity-token)"
     },
     /* EOF */
     {0}};
