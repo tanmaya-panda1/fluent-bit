@@ -190,7 +190,7 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
 
     body = flb_sds_cat(body, "client_id=", 10);
     body = flb_sds_cat(body, client_id, strlen(client_id));
-    body = flb_sds_cat(body, "&grant_type=client-credentials", 59);
+    body = flb_sds_cat(body, "&grant_type=urn:ietf:params:oauth:grant-type:token-exchange", 59);
     body = flb_sds_cat(body, "&client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer", 75);
     body = flb_sds_cat(body, "&client_assertion=", 18);
     body = flb_sds_cat(body, federated_token, flb_sds_len(federated_token));
@@ -205,7 +205,7 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
     }
 
     /* Set the body of the HTTP request */
-    c->body = body;
+    c->body_buf = body;
     c->body_len = flb_sds_len(body);
 
     /* Issue request */
@@ -239,6 +239,7 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
         ret = flb_oauth2_parse_json_response(c->resp.payload,
                                              c->resp.payload_size, ctx);
         if (ret == 0) {
+            flb_info("[azure workload identity] access token retrieved successfully");
             flb_http_client_destroy(c);
             flb_upstream_conn_release(u_conn);
             flb_sds_destroy(federated_token);
@@ -249,6 +250,7 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
         }
     }
 
+    flb_error("[azure workload identity] failed to parse token response");
     flb_http_client_destroy(c);
     flb_upstream_conn_release(u_conn);
     flb_sds_destroy(federated_token);
