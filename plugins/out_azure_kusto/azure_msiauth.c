@@ -144,6 +144,7 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
     struct flb_connection *u_conn;
     struct flb_http_client *c;
     flb_sds_t federated_token;
+    flb_sds_t body = NULL;
     
     /* Default token file location if not specified */
     if (!token_file) {
@@ -177,30 +178,36 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
     
     /* Prepare token exchange request */
     flb_http_add_header(c, "Content-Type", 12, "application/x-www-form-urlencoded", 33);
-    
+
     /* Build the form data for token exchange */
-    flb_http_buffer_size(c, 4096);
-    
-    ret = flb_http_buffer_append(c, "client_id=", 10);
-    ret |= flb_http_buffer_append(c, client_id, strlen(client_id));
-    
-    ret |= flb_http_buffer_append(c, "&grant_type=urn:ietf:params:oauth:grant-type:token-exchange", 59);
-    
-    ret |= flb_http_buffer_append(c, "&client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer", 75);
-    
-    ret |= flb_http_buffer_append(c, "&client_assertion=", 18);
-    ret |= flb_http_buffer_append(c, federated_token, flb_sds_len(federated_token));
-    
-    ret |= flb_http_buffer_append(c, "&scope=https://help.kusto.windows.net/.default", 47);
-    
-    if (ret != 0) {
-        flb_error("[azure workload identity] error building token exchange request");
+    body = flb_sds_create_size(4096);
+    if (!body) {
+        flb_error("[azure workload identity] failed to allocate memory for request body");
         flb_http_client_destroy(c);
         flb_upstream_conn_release(u_conn);
         flb_sds_destroy(federated_token);
         return -1;
     }
-    
+
+    body = flb_sds_cat(body, "client_id=", 10);
+    body = flb_sds_cat(body, client_id, strlen(client_id));
+    body = flb_sds_cat(body, "&grant_type=client-credentials", 59);
+    body = flb_sds_cat(body, "&client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer", 75);
+    body = flb_sds_cat(body, "&client_assertion=", 18);
+    body = flb_sds_cat(body, federated_token, flb_sds_len(federated_token));
+    body = flb_sds_cat(body, "&scope=https://help.kusto.windows.net/.default", 47);
+
+    if (!body) {
+        flb_error("[azure workload identity] failed to build request body");
+        flb_http_client_destroy(c);
+        flb_upstream_conn_release(u_conn);
+        flb_sds_destroy(federated_token);
+        return -1;
+    }
+
+    /* Set the body of the HTTP request */
+    flb_http_set_body(c, body, flb_sds_len(body));
+
     /* Issue request */
     ret = flb_http_do(c, &b_sent);
     if (ret != 0) {
@@ -208,9 +215,10 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
         flb_http_client_destroy(c);
         flb_upstream_conn_release(u_conn);
         flb_sds_destroy(federated_token);
+        flb_sds_destroy(body);
         return -1;
     }
-    
+
     flb_debug("[azure workload identity] HTTP Status=%i", c->resp.status);
     if (c->resp.payload_size > 0) {
         if (c->resp.status == 200) {
@@ -221,29 +229,31 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
             flb_http_client_destroy(c);
             flb_upstream_conn_release(u_conn);
             flb_sds_destroy(federated_token);
+            flb_sds_destroy(body);
             return -1;
         }
     }
-    
+
     /* Parse the response and extract the token */
     if (c->resp.payload_size > 0 && c->resp.status == 200) {
         ret = flb_oauth2_parse_json_response(c->resp.payload,
-                                           c->resp.payload_size, ctx);
+                                             c->resp.payload_size, ctx);
         if (ret == 0) {
             flb_info("[azure workload identity] access token retrieved successfully");
             flb_http_client_destroy(c);
             flb_upstream_conn_release(u_conn);
             flb_sds_destroy(federated_token);
+            flb_sds_destroy(body);
             ctx->issued = time(NULL);
             ctx->expires = ctx->issued + ctx->expires_in;
             return 0;
         }
     }
-    
-    flb_error("[azure workload identity] failed to parse token response");
+
     flb_http_client_destroy(c);
     flb_upstream_conn_release(u_conn);
     flb_sds_destroy(federated_token);
-    
+    flb_sds_destroy(body);
+
     return -1;
 }
