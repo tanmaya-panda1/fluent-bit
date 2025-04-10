@@ -136,7 +136,6 @@ static flb_sds_t read_token_from_file(const char *token_file)
     return token;
 }
 
-/* Exchange federated token for an access token */
 int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *token_file, const char *client_id, const char *tenant_id)
 {
     int ret;
@@ -145,19 +144,19 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
     struct flb_http_client *c;
     flb_sds_t federated_token;
     flb_sds_t body = NULL;
-    
+
     /* Default token file location if not specified */
     if (!token_file) {
         token_file = "/var/run/secrets/azure/tokens/azure-identity-token";
     }
-    
+
     /* Read the federated token from file */
     federated_token = read_token_from_file(token_file);
     if (!federated_token) {
         flb_error("[azure workload identity] failed to read federated token");
         return -1;
     }
-    
+
     /* Get upstream connection to Azure AD token endpoint */
     u_conn = flb_upstream_conn_get(ctx->u);
     if (!u_conn) {
@@ -165,17 +164,17 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
         flb_sds_destroy(federated_token);
         return -1;
     }
-    
+
     /* Create HTTP client context */
     c = flb_http_client(u_conn, FLB_HTTP_POST, ctx->uri,
-                       NULL, 0, ctx->host, atoi(ctx->port), NULL, 0);
+                        NULL, 0, ctx->host, atoi(ctx->port), NULL, 0);
     if (!c) {
         flb_error("[azure workload identity] error creating HTTP client context");
         flb_upstream_conn_release(u_conn);
         flb_sds_destroy(federated_token);
         return -1;
     }
-    
+
     /* Prepare token exchange request */
     flb_http_add_header(c, "Content-Type", 12, "application/x-www-form-urlencoded", 33);
 
@@ -206,7 +205,8 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
     }
 
     /* Set the body of the HTTP request */
-    flb_http_set_body(c, body, flb_sds_len(body));
+    c->body = body;
+    c->body_len = flb_sds_len(body);
 
     /* Issue request */
     ret = flb_http_do(c, &b_sent);
@@ -239,7 +239,6 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
         ret = flb_oauth2_parse_json_response(c->resp.payload,
                                              c->resp.payload_size, ctx);
         if (ret == 0) {
-            flb_info("[azure workload identity] access token retrieved successfully");
             flb_http_client_destroy(c);
             flb_upstream_conn_release(u_conn);
             flb_sds_destroy(federated_token);
