@@ -777,29 +777,20 @@ struct flb_connection *flb_upstream_conn_get(struct flb_upstream *u)
             /* Reset errno */
             conn->net_error = -1;
 
-#ifdef FLB_HAVE_TLS
-            /* Reset TLS session if present */
-            if (conn->tls_session) {
-                flb_tls_session_destroy(conn->tls_session);
-                conn->tls_session = NULL;
-            }
-            /* Create a new TLS session if TLS is enabled */
-            if (u->base.tls_context) {
-                conn->tls_session = flb_tls_session_create(u->base.tls_context, conn, NULL);
-                if (!conn->tls_session) {
-                    flb_error("[upstream] failed to create new TLS session for KA connection #%i to %s:%i",
-                              conn->fd, u->tcp_host, u->tcp_port);
-                    prepare_destroy_conn_safe(conn);
-                    conn = NULL;
-                    continue;
-                }
-            }
-#endif
-
             /* Connect timeout */
             conn->ts_assigned = time(NULL);
             flb_debug("[upstream] KA connection #%i to %s:%i has been assigned (recycled)",
                       conn->fd, u->tcp_host, u->tcp_port);
+            /*
+             * Note: since we are in a keepalive connection, the socket is already being
+             * monitored for possible disconnections while idle. Upon re-use by the caller
+             * when it try to send some data, the I/O interface (flb_io.c) will put the
+             * proper event mask and reuse, there is no need to remove the socket from
+             * the event loop and re-add it again.
+             *
+             * So just return the connection context.
+             */
+
             break;
         }
     }
