@@ -130,6 +130,8 @@ struct flb_azure_blob {
     /* Upstream connection */
     struct flb_upstream *u;
 
+    struct flb_tls *client_tls;
+
     struct flb_output_instance *ins;
     struct flb_config *config;
 };

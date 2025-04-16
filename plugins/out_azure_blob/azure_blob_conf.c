@@ -556,12 +556,29 @@ struct flb_azure_blob *flb_azure_blob_conf_create(struct flb_output_instance *in
     ctx->ins = ins;
     ctx->config = config;
 
+    /* Create dedicated TLS context for Azure Blob */
+    ctx->client_tls = flb_tls_create(FLB_TLS_CLIENT_MODE,
+                                     ins->tls_verify,
+                                     ins->tls_debug,
+                                     ins->tls_vhost,
+                                     ins->tls_ca_path,
+                                     ins->tls_ca_file,
+                                     ins->tls_crt_file,
+                                     ins->tls_key_file,
+                                     ins->tls_key_passwd);
+    if (!ctx->client_tls && ins->use_tls == FLB_TRUE) {
+        flb_plg_error(ctx->ins, "failed to create TLS context for Azure Blob");
+        flb_free(ctx);
+        return NULL;
+    }
+
     /* Set context */
     flb_output_set_context(ins, ctx);
 
     /* Load config map */
     ret = flb_output_config_map_set(ins, (void *) ctx);
     if (ret == -1) {
+        flb_tls_destroy(ctx->client_tls);
         flb_free(ctx);
 
         return NULL;
@@ -569,6 +586,8 @@ struct flb_azure_blob *flb_azure_blob_conf_create(struct flb_output_instance *in
 
     if (ctx->account_name == NULL) {
         flb_plg_error(ctx->ins, "'account_name' has not been set");
+        flb_tls_destroy(ctx->client_tls);
+        flb_free(ctx);
         return NULL;
     }
 
@@ -576,6 +595,7 @@ struct flb_azure_blob *flb_azure_blob_conf_create(struct flb_output_instance *in
         ret = flb_azure_blob_apply_remote_configuration(ctx);
 
         if (ret != 0) {
+            flb_tls_destroy(ctx->client_tls);
             flb_free(ctx);
 
             return NULL;
@@ -584,6 +604,8 @@ struct flb_azure_blob *flb_azure_blob_conf_create(struct flb_output_instance *in
 
     if (!ctx->container_name) {
         flb_plg_error(ctx->ins, "'container_name' has not been set");
+        flb_tls_destroy(ctx->client_tls);
+        flb_free(ctx);
         return NULL;
     }
 
@@ -601,18 +623,24 @@ struct flb_azure_blob *flb_azure_blob_conf_create(struct flb_output_instance *in
         }
         else {
             flb_plg_error(ctx->ins, "invalid auth_type value '%s'", tmp);
+            flb_tls_destroy(ctx->client_tls);
+            flb_free(ctx);
             return NULL;
         }
     }
     if (ctx->atype == AZURE_BLOB_AUTH_KEY &&
         ctx->shared_key == NULL) {
         flb_plg_error(ctx->ins, "'shared_key' has not been set");
+        flb_tls_destroy(ctx->client_tls);
+        flb_free(ctx);
         return NULL;
     }
 
     if (ctx->atype == AZURE_BLOB_AUTH_SAS) {
         if (ctx->sas_token == NULL) {
             flb_plg_error(ctx->ins, "'sas_token' has not been set");
+            flb_tls_destroy(ctx->client_tls);
+            flb_free(ctx);
             return NULL;
         }
         if (ctx->sas_token[0] == '?') {
@@ -625,6 +653,8 @@ struct flb_azure_blob *flb_azure_blob_conf_create(struct flb_output_instance *in
         ctx->shared_key != NULL) {
         ret = set_shared_key(ctx);
         if (ret == -1) {
+            flb_tls_destroy(ctx->client_tls);
+            flb_free(ctx);
             return NULL;
         }
     }
@@ -643,6 +673,8 @@ struct flb_azure_blob *flb_azure_blob_conf_create(struct flb_output_instance *in
         }
         else {
             flb_plg_error(ctx->ins, "invalid blob_type value '%s'", tmp);
+            flb_tls_destroy(ctx->client_tls);
+            flb_free(ctx);
             return NULL;
         }
     }
@@ -661,6 +693,8 @@ struct flb_azure_blob *flb_azure_blob_conf_create(struct flb_output_instance *in
         flb_plg_error(ctx->ins,
                       "the option 'compress_blob' is not compatible with 'appendblob' "
                       "blob_type");
+        flb_tls_destroy(ctx->client_tls);
+        flb_free(ctx);
         return NULL;
     }
 
@@ -679,9 +713,11 @@ struct flb_azure_blob *flb_azure_blob_conf_create(struct flb_output_instance *in
         }
 
         ctx->u = flb_upstream_create_url(config, ctx->endpoint,
-                                         io_flags, ins->tls);
+                                         io_flags, ctx->client_tls);
         if (!ctx->u) {
             flb_plg_error(ctx->ins, "invalid endpoint '%s'", ctx->endpoint);
+            flb_tls_destroy(ctx->client_tls);
+            flb_free(ctx);
             return NULL;
         }
         ctx->real_endpoint = flb_sds_create(ctx->endpoint);
@@ -690,6 +726,8 @@ struct flb_azure_blob *flb_azure_blob_conf_create(struct flb_output_instance *in
         ctx->real_endpoint = flb_sds_create_size(256);
         if (!ctx->real_endpoint) {
             flb_plg_error(ctx->ins, "cannot create endpoint");
+            flb_tls_destroy(ctx->client_tls);
+            flb_free(ctx);
             return NULL;
         }
         flb_sds_printf(&ctx->real_endpoint, "%s%s",
@@ -707,10 +745,12 @@ struct flb_azure_blob *flb_azure_blob_conf_create(struct flb_output_instance *in
         }
 
         ctx->u = flb_upstream_create(config, ctx->real_endpoint, port, io_flags,
-                                     ins->tls);
+                                     ctx->client_tls);
         if (!ctx->u) {
             flb_plg_error(ctx->ins, "cannot create upstream for endpoint '%s'",
                           ctx->real_endpoint);
+            flb_tls_destroy(ctx->client_tls);
+            flb_free(ctx);
             return NULL;
         }
     }
@@ -721,6 +761,8 @@ struct flb_azure_blob *flb_azure_blob_conf_create(struct flb_output_instance *in
     if (!ctx->base_uri) {
         flb_plg_error(ctx->ins, "cannot create base_uri for endpoint '%s'",
                       ctx->real_endpoint);
+        flb_tls_destroy(ctx->client_tls);
+        flb_free(ctx);
         return NULL;
     }
 
@@ -736,6 +778,8 @@ struct flb_azure_blob *flb_azure_blob_conf_create(struct flb_output_instance *in
         ctx->shared_key_prefix = flb_sds_create_size(256);
         if (!ctx->shared_key_prefix) {
             flb_plg_error(ctx->ins, "cannot create shared key prefix");
+            flb_tls_destroy(ctx->client_tls);
+            flb_free(ctx);
             return NULL;
         }
         flb_sds_printf(&ctx->shared_key_prefix, "SharedKey %s:", ctx->account_name);
@@ -752,6 +796,8 @@ struct flb_azure_blob *flb_azure_blob_conf_create(struct flb_output_instance *in
     if (ctx->database_file) {
         ctx->db = azb_db_open(ctx, ctx->database_file);
         if (!ctx->db) {
+            flb_tls_destroy(ctx->client_tls);
+            flb_free(ctx);
             return NULL;
         }
     }
@@ -812,6 +858,9 @@ void flb_azure_blob_conf_destroy(struct flb_azure_blob *ctx)
         flb_upstream_destroy(ctx->u);
     }
 
+    if (ctx->client_tls) {
+        flb_tls_destroy(ctx->client_tls);
+    }
 
     azb_db_close(ctx);
     flb_free(ctx);
