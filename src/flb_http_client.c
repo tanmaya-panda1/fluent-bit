@@ -1622,10 +1622,17 @@ int flb_http_client_proxy_connect(struct flb_connection *u_conn)
 
 void flb_http_client_destroy(struct flb_http_client *c)
 {
+    if (!c) {
+        return;
+    }
     http_headers_destroy(c);
     flb_free(c->resp.data);
     flb_free(c->header_buf);
     flb_free((void *)c->proxy.host);
+    // Defensive: set pointers to NULL after free
+    c->resp.data = NULL;
+    c->header_buf = NULL;
+    c->proxy.host = NULL;
     flb_free(c);
 }
 

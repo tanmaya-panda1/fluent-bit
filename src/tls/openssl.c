@@ -877,12 +877,10 @@ static int tls_net_read(struct flb_tls_session *session,
 
     if (session->ptr == NULL) {
         flb_error("[tls] error: uninitialized backend session");
-
         return -1;
     }
 
     backend_session = (struct tls_session *) session->ptr;
-
     ctx = backend_session->parent;
 
     pthread_mutex_lock(&ctx->mutex);
@@ -892,8 +890,8 @@ static int tls_net_read(struct flb_tls_session *session,
     ret = SSL_read(backend_session->ssl, buf, len);
 
     if (ret <= 0) {
+        int orig_ret = ret;
         ret = SSL_get_error(backend_session->ssl, ret);
-
         if (ret == SSL_ERROR_WANT_READ) {
             ret = FLB_TLS_WANT_READ;
         }
@@ -902,21 +900,16 @@ static int tls_net_read(struct flb_tls_session *session,
         }
         else if (ret == SSL_ERROR_SYSCALL) {
             flb_errno();
-            ERR_error_string_n(ret, err_buf, sizeof(err_buf)-1);
-            flb_error("[tls] syscall error: %s", err_buf);
-
-            /* According to the documentation these are non-recoverable
-             * errors so we don't need to screen them before saving them
-             * to the net_error field.
-             */
-
+            unsigned long openssl_err = ERR_get_error();
+            ERR_error_string_n(openssl_err, err_buf, sizeof(err_buf)-1);
+            flb_error("[tls] syscall error: %s (OpenSSL error: %s)", strerror(errno), err_buf);
             session->connection->net_error = errno;
-
             ret = -1;
         }
         else if (ret < 0) {
-            ERR_error_string_n(ret, err_buf, sizeof(err_buf)-1);
-            flb_error("[tls] error: %s", err_buf);
+            unsigned long openssl_err = ERR_get_error();
+            ERR_error_string_n(openssl_err, err_buf, sizeof(err_buf)-1);
+            flb_error("[tls] error: %s (OpenSSL error: %s)", orig_ret < 0 ? "SSL_read returned < 0" : "unknown", err_buf);
         }
         else {
             ret = -1;

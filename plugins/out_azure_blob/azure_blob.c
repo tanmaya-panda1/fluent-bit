@@ -93,7 +93,7 @@ static int create_blob(struct flb_azure_blob *ctx, char *name)
     u_conn = flb_upstream_conn_get(ctx->u);
     if (!u_conn) {
         flb_plg_error(ctx->ins,
-                      "cannot create upstream connection for create_append_blob");
+                      "cannot create upstream connection for create_append_blob (NULL returned, possible TLS failure)");
         flb_sds_destroy(uri);
         return FLB_RETRY;
     }
@@ -103,7 +103,7 @@ static int create_blob(struct flb_azure_blob *ctx, char *name)
                         uri,
                         NULL, 0, NULL, 0, NULL, 0);
     if (!c) {
-        flb_plg_error(ctx->ins, "cannot create HTTP client context");
+        flb_plg_error(ctx->ins, "cannot create HTTP client context (NULL returned)");
         flb_upstream_conn_release(u_conn);
         flb_sds_destroy(uri);
         return FLB_RETRY;
@@ -119,8 +119,8 @@ static int create_blob(struct flb_azure_blob *ctx, char *name)
 
     if (ret == -1) {
         flb_plg_error(ctx->ins, "error sending append_blob");
-        flb_http_client_destroy(c);
-        flb_upstream_conn_release(u_conn);
+        if (c) flb_http_client_destroy(c);
+        if (u_conn) flb_upstream_conn_release(u_conn);
         return FLB_RETRY;
     }
 
@@ -141,13 +141,13 @@ static int create_blob(struct flb_azure_blob *ctx, char *name)
             flb_plg_error(ctx->ins, "http_status=%i cannot create append blob",
                           c->resp.status);
         }
-        flb_http_client_destroy(c);
-        flb_upstream_conn_release(u_conn);
+        if (c) flb_http_client_destroy(c);
+        if (u_conn) flb_upstream_conn_release(u_conn);
         return FLB_RETRY;
     }
 
-    flb_http_client_destroy(c);
-    flb_upstream_conn_release(u_conn);
+    if (c) flb_http_client_destroy(c);
+    if (u_conn) flb_upstream_conn_release(u_conn);
     return FLB_OK;
 }
 
@@ -168,7 +168,7 @@ static int delete_blob(struct flb_azure_blob *ctx, char *name)
     u_conn = flb_upstream_conn_get(ctx->u);
     if (!u_conn) {
         flb_plg_error(ctx->ins,
-                      "cannot create upstream connection for create_append_blob");
+                      "cannot create upstream connection for create_append_blob (NULL returned, possible TLS failure)");
         flb_sds_destroy(uri);
         return FLB_RETRY;
     }
@@ -178,7 +178,7 @@ static int delete_blob(struct flb_azure_blob *ctx, char *name)
                         uri,
                         NULL, 0, NULL, 0, NULL, 0);
     if (!c) {
-        flb_plg_error(ctx->ins, "cannot create HTTP client context");
+        flb_plg_error(ctx->ins, "cannot create HTTP client context (NULL returned)");
         flb_upstream_conn_release(u_conn);
         flb_sds_destroy(uri);
         return FLB_RETRY;
@@ -194,8 +194,8 @@ static int delete_blob(struct flb_azure_blob *ctx, char *name)
 
     if (ret == -1) {
         flb_plg_error(ctx->ins, "error sending append_blob");
-        flb_http_client_destroy(c);
-        flb_upstream_conn_release(u_conn);
+        if (c) flb_http_client_destroy(c);
+        if (u_conn) flb_upstream_conn_release(u_conn);
         return FLB_RETRY;
     }
 
@@ -216,13 +216,13 @@ static int delete_blob(struct flb_azure_blob *ctx, char *name)
             flb_plg_error(ctx->ins, "http_status=%i cannot delete append blob",
                           c->resp.status);
         }
-        flb_http_client_destroy(c);
-        flb_upstream_conn_release(u_conn);
+        if (c) flb_http_client_destroy(c);
+        if (u_conn) flb_upstream_conn_release(u_conn);
         return FLB_RETRY;
     }
 
-    flb_http_client_destroy(c);
-    flb_upstream_conn_release(u_conn);
+    if (c) flb_http_client_destroy(c);
+    if (u_conn) flb_upstream_conn_release(u_conn);
     return FLB_OK;
 }
 
@@ -247,7 +247,7 @@ static int http_send_blob(struct flb_config *config, struct flb_azure_blob *ctx,
     u_conn = flb_upstream_conn_get(ctx->u);
     if (!u_conn) {
         flb_plg_error(ctx->ins,
-                      "cannot create TCP upstream connection");
+                      "cannot create TCP upstream connection (NULL returned, possible TLS failure)");
         return FLB_RETRY;
     }
 
@@ -283,7 +283,7 @@ static int http_send_blob(struct flb_config *config, struct flb_azure_blob *ctx,
                         uri,
                         payload_buf, payload_size, NULL, 0, NULL, 0);
     if (!c) {
-        flb_plg_error(ctx->ins, "cannot create HTTP client context");
+        flb_plg_error(ctx->ins, "cannot create HTTP client context (NULL returned)");
         if (compressed == FLB_TRUE) {
             flb_free(payload_buf);
         }
@@ -303,17 +303,18 @@ static int http_send_blob(struct flb_config *config, struct flb_azure_blob *ctx,
         flb_free(payload_buf);
     }
 
-    flb_upstream_conn_release(u_conn);
+    if (u_conn) flb_upstream_conn_release(u_conn);
 
     /* Validate HTTP status */
     if (ret == -1) {
         flb_plg_error(ctx->ins, "error sending append_blob for %s", ref_name);
+        if (c) flb_http_client_destroy(c);
         return FLB_RETRY;
     }
 
     if (c->resp.status == 201) {
         flb_plg_info(ctx->ins, "content uploaded successfully: %s", ref_name);
-        flb_http_client_destroy(c);
+        if (c) flb_http_client_destroy(c);
         return FLB_OK;
     }
     else if (c->resp.status == 404) {
@@ -324,14 +325,14 @@ static int http_send_blob(struct flb_config *config, struct flb_azure_blob *ctx,
         }
 
         flb_plg_info(ctx->ins, "blob not found: %s", c->uri);
-        flb_http_client_destroy(c);
+        if (c) flb_http_client_destroy(c);
         return CREATE_BLOB;
     }
     else if (c->resp.payload_size > 0) {
         flb_plg_error(ctx->ins, "http_status=%i cannot append content to blob\n%s",
                       c->resp.status, c->resp.payload);
         if (strstr(c->resp.payload, "must be 0 for Create Append")) {
-            flb_http_client_destroy(c);
+            if (c) flb_http_client_destroy(c);
             return CREATE_BLOB;
         }
     }
@@ -339,7 +340,7 @@ static int http_send_blob(struct flb_config *config, struct flb_azure_blob *ctx,
         flb_plg_error(ctx->ins, "cannot upload %s content to blob (http_status=%i)",
                       ref_name, c->resp.status);
     }
-    flb_http_client_destroy(c);
+    if (c) flb_http_client_destroy(c);
 
     return FLB_RETRY;
 }
@@ -453,7 +454,7 @@ static int create_container(struct flb_azure_blob *ctx, char *name)
     u_conn = flb_upstream_conn_get(ctx->u);
     if (!u_conn) {
         flb_plg_error(ctx->ins,
-                      "cannot create upstream connection for container creation");
+                      "cannot create upstream connection for container creation (NULL returned, possible TLS failure)");
         return FLB_FALSE;
     }
 
@@ -469,7 +470,7 @@ static int create_container(struct flb_azure_blob *ctx, char *name)
                         uri,
                         NULL, 0, NULL, 0, NULL, 0);
     if (!c) {
-        flb_plg_error(ctx->ins, "cannot create HTTP client context");
+        flb_plg_error(ctx->ins, "cannot create HTTP client context (NULL returned)");
         flb_upstream_conn_release(u_conn);
         return FLB_FALSE;
     }
@@ -487,8 +488,8 @@ static int create_container(struct flb_azure_blob *ctx, char *name)
     /* Validate http response */
     if (ret == -1) {
         flb_plg_error(ctx->ins, "error requesting container creation");
-        flb_http_client_destroy(c);
-        flb_upstream_conn_release(u_conn);
+        if (c) flb_http_client_destroy(c);
+        if (u_conn) flb_upstream_conn_release(u_conn);
         return FLB_FALSE;
     }
 
@@ -504,13 +505,13 @@ static int create_container(struct flb_azure_blob *ctx, char *name)
             flb_plg_error(ctx->ins, "cannot create container '%s'\n%s",
                           name, c->resp.payload);
         }
-        flb_http_client_destroy(c);
-        flb_upstream_conn_release(u_conn);
+        if (c) flb_http_client_destroy(c);
+        if (u_conn) flb_upstream_conn_release(u_conn);
         return FLB_FALSE;
     }
 
-    flb_http_client_destroy(c);
-    flb_upstream_conn_release(u_conn);
+    if (c) flb_http_client_destroy(c);
+    if (u_conn) flb_upstream_conn_release(u_conn);
     return FLB_TRUE;
 }
 
@@ -546,7 +547,7 @@ static int ensure_container(struct flb_azure_blob *ctx)
     u_conn = flb_upstream_conn_get(ctx->u);
     if (!u_conn) {
         flb_plg_error(ctx->ins,
-                      "cannot create upstream connection for container check");
+                      "cannot create upstream connection for container check (NULL returned, possible TLS failure)");
         flb_sds_destroy(uri);
         return FLB_FALSE;
     }
@@ -556,8 +557,10 @@ static int ensure_container(struct flb_azure_blob *ctx)
                         uri,
                         NULL, 0, NULL, 0, NULL, 0);
     if (!c) {
-        flb_plg_error(ctx->ins, "cannot create HTTP client context");
+        flb_plg_error(ctx->ins, "cannot create HTTP client context (NULL returned)");
         flb_upstream_conn_release(u_conn);
+        u_conn = NULL;
+        flb_sds_destroy(uri);
         return FLB_FALSE;
     }
     flb_http_strip_port_from_host(c);
@@ -572,15 +575,28 @@ static int ensure_container(struct flb_azure_blob *ctx)
 
     if (ret == -1) {
         flb_plg_error(ctx->ins, "error requesting container properties");
-        flb_upstream_conn_release(u_conn);
+        if (c) {
+            flb_http_client_destroy(c);
+            c = NULL;
+        }
+        if (u_conn) {
+            flb_upstream_conn_release(u_conn);
+            u_conn = NULL;
+        }
         return FLB_FALSE;
     }
 
     status = c->resp.status;
-    flb_http_client_destroy(c);
+    if (c) {
+        flb_http_client_destroy(c);
+        c = NULL;
+    }
 
     /* Release connection */
-    flb_upstream_conn_release(u_conn);
+    if (u_conn) {
+        flb_upstream_conn_release(u_conn);
+        u_conn = NULL;
+    }
 
     /* Request was successful, validate HTTP status code */
     if (status == 404) {
