@@ -751,21 +751,9 @@ struct flb_connection *flb_upstream_conn_get(struct flb_upstream *u)
         mk_list_foreach_safe(head, tmp, &uq->av_queue) {
             conn = mk_list_entry(head, struct flb_connection, _head);
 
-            // Defensive: Log connection state and protocol (if available)
-            flb_debug("[upstream] Considering KA connection #%i to %s:%i, fd=%i, net_error=%i, protocol=%s", 
-                conn->fd, u->tcp_host, u->tcp_port, conn->fd, conn->net_error,
-                conn->tls_session && conn->tls_session->alpn ? conn->tls_session->alpn : "unknown");
-
-            // Defensive: Check protocol version if available (pseudo-code, adapt as needed)
-            // For example, if you track protocol in conn->protocol_version or via ALPN:
-            // const char *expected_alpn = ...; // set this based on your config/desired protocol
-            // if (conn->tls_session && conn->tls_session->alpn && strcmp(conn->tls_session->alpn, expected_alpn) != 0) {
-            //     flb_warn("[upstream] Protocol mismatch on KA connection #%i: expected %s, got %s. Destroying.",
-            //         conn->fd, expected_alpn, conn->tls_session->alpn);
-            //     prepare_destroy_conn_safe(conn);
-            //     conn = NULL;
-            //     continue;
-            // }
+            // Defensive: Log connection state (protocol/alpn not available)
+            flb_debug("[upstream] Considering KA connection #%i to %s:%i, fd=%i, net_error=%i", 
+                conn->fd, u->tcp_host, u->tcp_port, conn->fd, conn->net_error);
 
             flb_stream_acquire_lock(&u->base, FLB_TRUE);
 
