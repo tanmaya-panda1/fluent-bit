@@ -172,12 +172,12 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
     body = flb_sds_cat(body, "client_id=", 10);
     body = flb_sds_cat(body, client_id, strlen(client_id));
     /* Use the correct grant_type and length for workload identity */
-    body = flb_sds_cat(body, "&grant_type=urn:ietf:params:oauth:grant-type:token-exchange", 59);
+    body = flb_sds_cat(body, "&grant_type=client_credentials", 30);
     body = flb_sds_cat(body, "&client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer", 75);
     body = flb_sds_cat(body, "&client_assertion=", 18);
     body = flb_sds_cat(body, federated_token, flb_sds_len(federated_token));
     /* Use the correct scope and length for Kusto */
-    body = flb_sds_cat(body, "&scope=https://kusto.windows.net/.default", 39);
+    body = flb_sds_cat(body, "&scope=https://help.kusto.windows.net/.default", 39);
 
     if (!body) {
         /* This check might be redundant if flb_sds_cat handles errors, but safe */
