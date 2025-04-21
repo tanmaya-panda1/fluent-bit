@@ -161,65 +161,75 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
 
     flb_info("[azure workload identity] after read token from file %s", federated_token);
 
-    /* Get upstream connection to Azure AD token endpoint */
-    u_conn = flb_upstream_conn_get(ctx->u);
-    if (!u_conn) {
-        flb_error("[azure workload identity] could not get an upstream connection");
-        flb_sds_destroy(federated_token);
-        return -1;
-    }
-
-    /* Create HTTP client context */
-    c = flb_http_client(u_conn, FLB_HTTP_POST, ctx->uri,
-                        NULL, 0, ctx->host, atoi(ctx->port), NULL, 0);
-    if (!c) {
-        flb_error("[azure workload identity] error creating HTTP client context");
-        flb_upstream_conn_release(u_conn);
-        flb_sds_destroy(federated_token);
-        return -1;
-    }
-
-    /* Prepare token exchange request */
-    flb_http_add_header(c, "Content-Type", 12, "application/x-www-form-urlencoded", 33);
-
-    /* Build the form data for token exchange */
+    /* Build the form data for token exchange *before* creating the client */
     body = flb_sds_create_size(4096);
     if (!body) {
         flb_error("[azure workload identity] failed to allocate memory for request body");
-        flb_http_client_destroy(c);
-        flb_upstream_conn_release(u_conn);
         flb_sds_destroy(federated_token);
         return -1;
     }
 
     body = flb_sds_cat(body, "client_id=", 10);
     body = flb_sds_cat(body, client_id, strlen(client_id));
-    body = flb_sds_cat(body, "&grant_type=client_credentials", 30);
+    /* Use the correct grant_type and length for workload identity */
+    body = flb_sds_cat(body, "&grant_type=urn:ietf:params:oauth:grant-type:token-exchange", 59);
     body = flb_sds_cat(body, "&client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer", 75);
     body = flb_sds_cat(body, "&client_assertion=", 18);
     body = flb_sds_cat(body, federated_token, flb_sds_len(federated_token));
-    body = flb_sds_cat(body, "&scope=https://help.kusto.windows.net/.default", 47);
+    /* Use the correct scope and length for Kusto */
+    body = flb_sds_cat(body, "&scope=https://kusto.windows.net/.default", 39);
 
     if (!body) {
+        /* This check might be redundant if flb_sds_cat handles errors, but safe */
         flb_error("[azure workload identity] failed to build request body");
-        flb_http_client_destroy(c);
-        flb_upstream_conn_release(u_conn);
         flb_sds_destroy(federated_token);
         return -1;
     }
 
-    /* Set the body of the HTTP request */
-    c->body_buf = body;
-    c->body_len = flb_sds_len(body);
+    /* Get upstream connection to Azure AD token endpoint */
+    u_conn = flb_upstream_conn_get(ctx->u);
+    if (!u_conn) {
+        flb_error("[azure workload identity] could not get an upstream connection");
+        flb_sds_destroy(federated_token);
+        flb_sds_destroy(body); /* Clean up allocated body */
+        return -1;
+    }
+
+    /* Create HTTP client context, passing the body directly */
+    c = flb_http_client(u_conn, FLB_HTTP_POST, ctx->uri,
+                        body, flb_sds_len(body), /* Pass body buffer and length here */
+                        ctx->host, atoi(ctx->port), NULL, 0);
+    if (!c) {
+        flb_error("[azure workload identity] error creating HTTP client context");
+        flb_upstream_conn_release(u_conn);
+        flb_sds_destroy(federated_token);
+        flb_sds_destroy(body); /* Clean up allocated body */
+        return -1;
+    }
+
+    /* Prepare token exchange request headers */
+    flb_http_add_header(c, "Content-Type", 12, "application/x-www-form-urlencoded", 33);
+
+    /* Remove the direct assignment as body is passed during creation */
+    /* c->body_buf = body; */
+    /* c->body_len = flb_sds_len(body); */
+
+    /* Add a debug log to verify the body content just before sending */
+    flb_debug("[azure workload identity] Sending request body (len=%zu): %s", flb_sds_len(body), body);
 
     /* Issue request */
     ret = flb_http_do(c, &b_sent);
+
+    /* Clean up the body sds now that the request is done or client creation failed */
+    flb_sds_destroy(body);
+    body = NULL;
+
     if (ret != 0) {
         flb_warn("[azure workload identity] error in HTTP request, http_do=%i", ret);
         flb_http_client_destroy(c);
         flb_upstream_conn_release(u_conn);
         flb_sds_destroy(federated_token);
-        flb_sds_destroy(body);
+        /* body already destroyed */
         return -1;
     }
 
@@ -233,7 +243,7 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
             flb_http_client_destroy(c);
             flb_upstream_conn_release(u_conn);
             flb_sds_destroy(federated_token);
-            flb_sds_destroy(body);
+            /* body already destroyed */
             return -1;
         }
     }
@@ -247,7 +257,7 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
             flb_http_client_destroy(c);
             flb_upstream_conn_release(u_conn);
             flb_sds_destroy(federated_token);
-            flb_sds_destroy(body);
+            /* body already destroyed */
             ctx->issued = time(NULL);
             ctx->expires = ctx->issued + ctx->expires_in;
             return 0;
@@ -258,7 +268,7 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
     flb_http_client_destroy(c);
     flb_upstream_conn_release(u_conn);
     flb_sds_destroy(federated_token);
-    flb_sds_destroy(body);
+    /* body already destroyed */
 
     return -1;
 }
