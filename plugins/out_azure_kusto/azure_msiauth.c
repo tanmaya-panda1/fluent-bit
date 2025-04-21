@@ -145,6 +145,8 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
     flb_sds_t federated_token;
     flb_sds_t body = NULL;
 
+    flb_info("[azure workload identity] inside flb_azure_workload_identity_token_get");
+
     /* Default token file location if not specified */
     if (!token_file) {
         token_file = "/var/run/secrets/azure/tokens/azure-identity-token";
@@ -156,6 +158,8 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
         flb_error("[azure workload identity] failed to read federated token");
         return -1;
     }
+
+    flb_info("[azure workload identity] after read token from file %s", federated_token);
 
     /* Get upstream connection to Azure AD token endpoint */
     u_conn = flb_upstream_conn_get(ctx->u);
@@ -190,7 +194,7 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
 
     body = flb_sds_cat(body, "client_id=", 10);
     body = flb_sds_cat(body, client_id, strlen(client_id));
-    body = flb_sds_cat(body, "&grant_type=urn:ietf:params:oauth:grant-type:token-exchange", 59);
+    body = flb_sds_cat(body, "&grant_type=client_credentials", 29);
     body = flb_sds_cat(body, "&client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer", 75);
     body = flb_sds_cat(body, "&client_assertion=", 18);
     body = flb_sds_cat(body, federated_token, flb_sds_len(federated_token));
