@@ -177,7 +177,7 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
     body = flb_sds_cat(body, "&client_assertion=", 18);
     body = flb_sds_cat(body, federated_token, flb_sds_len(federated_token));
     /* Use the correct scope and length for Kusto */
-    body = flb_sds_cat(body, "&scope=https://help.kusto.windows.net/.default", 39);
+    body = flb_sds_cat(body, "&scope=https://help.kusto.windows.net/.default", 46);
 
     if (!body) {
         /* This check might be redundant if flb_sds_cat handles errors, but safe */
