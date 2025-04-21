@@ -194,7 +194,7 @@ int flb_azure_workload_identity_token_get(struct flb_oauth2 *ctx, const char *to
 
     body = flb_sds_cat(body, "client_id=", 10);
     body = flb_sds_cat(body, client_id, strlen(client_id));
-    body = flb_sds_cat(body, "&grant_type=client_credentials", 29);
+    body = flb_sds_cat(body, "&grant_type=client_credentials", 30);
     body = flb_sds_cat(body, "&client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer", 75);
     body = flb_sds_cat(body, "&client_assertion=", 18);
     body = flb_sds_cat(body, federated_token, flb_sds_len(federated_token));
