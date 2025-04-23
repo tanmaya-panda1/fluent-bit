@@ -493,7 +493,9 @@ static int send_blob(struct flb_config *config,
     }
 
     if (!uri) {
-        flb_free(block_id);
+        if (block_id != NULL) {
+            flb_free(block_id);
+        }
         flb_sds_destroy(ref_name);
         return FLB_RETRY;
     }
@@ -508,7 +510,9 @@ static int send_blob(struct flb_config *config,
                                 &payload_buf, &payload_size);
         if (ret != 0) {
             flb_sds_destroy(uri);
-            flb_free(block_id);
+            if (block_id != NULL) {
+                flb_free(block_id);
+            }
             flb_sds_destroy(ref_name);
             return FLB_ERROR;
         }
@@ -529,7 +533,6 @@ static int send_blob(struct flb_config *config,
         /* For Logs type, we need to commit the block right away */
         if (event_type == FLB_EVENT_TYPE_LOGS) {
             ret = azb_block_blob_commit_block(ctx, block_id, tag, ms, generated_random_string);
-            flb_free(block_id);
         }
     }
     else if (ret == CREATE_BLOB) {
@@ -545,7 +548,10 @@ static int send_blob(struct flb_config *config,
     }
 
     flb_sds_destroy(uri);
-    flb_free(block_id);
+
+    if (block_id != NULL) {
+        flb_free(block_id);
+    }
 
     return ret;
 }
@@ -654,7 +660,7 @@ static int ensure_container(struct flb_azure_blob *ctx)
     uri = azb_uri_ensure_or_create_container(ctx);
     if (!uri) {
         flb_plg_error(ctx->ins, "cannot create container URI");
-        return FLB_FALSE; 
+        return FLB_FALSE;
     }
 
     if (ctx->buffering_enabled == FLB_TRUE){
@@ -720,7 +726,7 @@ static int ensure_container(struct flb_azure_blob *ctx)
                       ctx->container_name);
         return FLB_FALSE;
     }
-
+    
     flb_plg_error(ctx->ins, "get container request failed, status=%i",
                   status);
 
