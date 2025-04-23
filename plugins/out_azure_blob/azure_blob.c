@@ -1617,6 +1617,9 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
             if (tag_name && ctx->unify_tag == FLB_TRUE) {
                 flb_sds_destroy(tag_name);
             }
+            if (block_id != NULL){
+                flb_free(block_id);
+            }
             if (final_payload) {
                 flb_free(final_payload);
             }
@@ -1639,6 +1642,7 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
             if (ret != 0) {
                 flb_plg_error(ctx->ins, "cannot reformat data into json");
                 ret = FLB_RETRY;
+                goto cleanup;
             }
             /* Buffering mode is disabled, proceed with regular flow */
             ret = send_blob(config, i_ins, ctx,
@@ -1675,8 +1679,12 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
         }
     }
 
-    if (json){
+    cleanup:
+    if (json) {
         flb_sds_destroy(json);
+    }
+    if (block_id != NULL) {
+        flb_free(block_id);
     }
 
     /* FLB_RETRY, FLB_OK, FLB_ERROR */
