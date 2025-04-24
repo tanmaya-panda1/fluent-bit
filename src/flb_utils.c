@@ -496,7 +496,7 @@ int flb_utils_timer_consume(flb_pipefd_t fd)
 
     ret = flb_pipe_r(fd, &val, sizeof(val));
     if (ret == -1) {
-        flb_errno();
+        flb_pipe_error();
         return -1;
     }
 
@@ -517,7 +517,7 @@ int flb_utils_pipe_byte_consume(flb_pipefd_t fd)
 
     ret = flb_pipe_r(fd, &val, sizeof(val));
     if (ret == -1) {
-        flb_errno();
+        flb_pipe_error();
         return -1;
     }
 
@@ -801,6 +801,7 @@ int flb_utils_write_str(char *buf, int *off, size_t size, const char *str, size_
     off_t offset = 0;
     char tmp[16];
     char *p;
+    const size_t inst_len = FLB_SIMD_VEC8_INST_LEN;
 
     /* to encode codepoints > 0xFFFF */
     uint16_t high;
@@ -816,10 +817,10 @@ int flb_utils_write_str(char *buf, int *off, size_t size, const char *str, size_
     p = buf + *off;
 
     /* align length to the nearest multiple of the vector size for safe SIMD processing */
-    vlen = str_len & ~(sizeof(flb_vector8) - 1);
+    vlen = str_len & ~(inst_len - 1);
     for (i = 0;;) {
         /* SIMD optimization: Process chunk of input string */
-        for (; i < vlen; i += sizeof(flb_vector8)) {
+        for (; i < vlen; i += inst_len) {
             flb_vector8 chunk;
             flb_vector8_load(&chunk, (const uint8_t *)&str[i]);
 
@@ -851,7 +852,7 @@ int flb_utils_write_str(char *buf, int *off, size_t size, const char *str, size_
         }
 
         /* Process remaining characters one by one */
-        for (b = 0; b < sizeof(flb_vector8); b++) {
+        for (b = 0; b < inst_len; b++) {
             if (i >= str_len) {
                 /* all characters has been processed */
                 goto done;

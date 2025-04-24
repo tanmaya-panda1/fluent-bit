@@ -1202,7 +1202,7 @@ static inline void flb_output_return(int ret, struct flb_coro *co) {
     /* Notify the event loop about our return status */
     n = flb_pipe_w(pipe_fd, (void *) &val, sizeof(val));
     if (n == -1) {
-        flb_errno();
+        flb_pipe_error();
     }
 
     /*
@@ -1321,5 +1321,7 @@ int flb_output_set_http_debug_callbacks(struct flb_output_instance *ins);
 int flb_output_task_flush(struct flb_task *task,
                           struct flb_output_instance *out_ins,
                           struct flb_config *config);
+
+struct mk_list *flb_output_get_global_config_map(struct flb_config *config);
 
 #endif

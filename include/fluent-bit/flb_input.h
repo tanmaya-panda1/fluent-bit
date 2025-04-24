@@ -676,7 +676,7 @@ static FLB_INLINE void flb_input_return(struct flb_coro *coro) {
     val = FLB_BITS_U64_SET(FLB_ENGINE_IN_CORO, ins->id);
     n = flb_pipe_w(ins->ch_events[1], (void *) &val, sizeof(val));
     if (n == -1) {
-        flb_errno();
+        flb_pipe_error();
     }
 
     flb_input_coro_prepare_destroy(input_coro);
@@ -732,6 +732,8 @@ static inline int flb_input_config_map_set(struct flb_input_instance *ins,
 
     return ret;
 }
+
+struct mk_list *flb_input_get_global_config_map(struct flb_config *config);
 
 int flb_input_register_all(struct flb_config *config);
 struct flb_input_instance *flb_input_new(struct flb_config *config,
