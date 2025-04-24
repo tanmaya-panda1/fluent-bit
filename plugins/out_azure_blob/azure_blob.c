@@ -1503,27 +1503,32 @@ static void cb_azure_blob_flush(struct flb_event_chunk *event_chunk,
     }
 
     if (event_chunk->type == FLB_EVENT_TYPE_LOGS) {
-        ret = send_blob(config, i_ins, ctx,
-                        FLB_EVENT_TYPE_LOGS,
-                        ctx->btype, /* blob type per user configuration  */
-                        (char *) event_chunk->tag,  /* use tag as 'name' */
-                        0,  /* part id */
-                        (char *) event_chunk->tag, flb_sds_len(event_chunk->tag),
-                        (char *) event_chunk->data, event_chunk->size);
+        if (ctx->buffering_enabled == FLB_TRUE){
 
-        if (ret == CREATE_BLOB) {
-            ret = create_blob(ctx, event_chunk->tag);
-            if (ret == FLB_OK) {
-                ret = send_blob(config, i_ins, ctx,
-                                FLB_EVENT_TYPE_LOGS,
-                                ctx->btype, /* blob type per user configuration  */
-                                (char *) event_chunk->tag,  /* use tag as 'name' */
-                                0,  /* part id */
-                                (char *) event_chunk->tag,  /* use tag as 'name' */
-                                flb_sds_len(event_chunk->tag),
-                                (char *) event_chunk->data, event_chunk->size);
+        }else{
+            ret = send_blob(config, i_ins, ctx,
+                            FLB_EVENT_TYPE_LOGS,
+                            ctx->btype, /* blob type per user configuration  */
+                            (char *) event_chunk->tag,  /* use tag as 'name' */
+                            0,  /* part id */
+                            (char *) event_chunk->tag, flb_sds_len(event_chunk->tag),
+                            (char *) event_chunk->data, event_chunk->size);
+
+            if (ret == CREATE_BLOB) {
+                ret = create_blob(ctx, event_chunk->tag);
+                if (ret == FLB_OK) {
+                    ret = send_blob(config, i_ins, ctx,
+                                    FLB_EVENT_TYPE_LOGS,
+                                    ctx->btype, /* blob type per user configuration  */
+                                    (char *) event_chunk->tag,  /* use tag as 'name' */
+                                    0,  /* part id */
+                                    (char *) event_chunk->tag,  /* use tag as 'name' */
+                                    flb_sds_len(event_chunk->tag),
+                                    (char *) event_chunk->data, event_chunk->size);
+                }
             }
         }
+
     }
     else if (event_chunk->type == FLB_EVENT_TYPE_BLOBS) {
         /*
