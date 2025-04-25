@@ -1276,6 +1276,13 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
                 goto error;
             }
 
+            /* Check if resources were properly initialized */
+            if (!ctx->resources || !ctx->resources->blob_ha || !ctx->resources->queue_ha) {
+                flb_plg_error(ctx->ins, "ingestion resources were not properly initialized");
+                ret = FLB_RETRY;
+                goto error;
+            }
+
             /* Ingest data to kusto */
             ret = ingest_to_kusto(ctx, json, upload_file,
                                       tag_name,
@@ -1370,6 +1377,13 @@ static void cb_azure_kusto_flush(struct flb_event_chunk *event_chunk,
         flb_plg_trace(ctx->ins, "load_ingestion_resources: ret=%d", ret);
         if (ret != 0) {
             flb_plg_error(ctx->ins, "cannot load ingestion resources");
+            ret = FLB_RETRY;
+            goto error;
+        }
+
+        /* Check if resources were properly initialized */
+        if (!ctx->resources || !ctx->resources->blob_ha || !ctx->resources->queue_ha) {
+            flb_plg_error(ctx->ins, "ingestion resources were not properly initialized");
             ret = FLB_RETRY;
             goto error;
         }
