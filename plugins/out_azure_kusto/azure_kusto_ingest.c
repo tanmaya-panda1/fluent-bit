@@ -138,6 +138,155 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
 {
     int ret = -1;
     flb_sds_t uri = NULL;
+    struct flb_upstream_node *u_node = NULL;
+    struct flb_forward_config *fc = NULL;
+    struct flb_connection *u_conn = NULL;
+    struct flb_http_client *c = NULL;
+    size_t resp_size;
+    time_t now;
+    struct tm tm;
+    char date_header[64];
+    int date_len;
+
+    if (!ctx || !ctx->resources || !ctx->resources->blob_ha || !blob_id || !payload) {
+        flb_plg_error(ctx->ins, "invalid parameters for blob creation");
+        return NULL;
+    }
+
+    /* Generate the date header for Azure */
+    now = time(NULL);
+    if (!gmtime_r(&now, &tm)) {
+        flb_plg_error(ctx->ins, "error generating GMT time");
+        return NULL;
+    }
+
+    date_len = strftime(date_header, sizeof(date_header) - 1,
+                        "%a, %d %b %Y %H:%M:%S GMT", &tm);
+    if (date_len <= 0) {
+        flb_plg_error(ctx->ins, "error formatting date header");
+        return NULL;
+    }
+
+    /* Get upstream node from the blob HA pool */
+    u_node = flb_upstream_ha_node_get(ctx->resources->blob_ha);
+    if (!u_node) {
+        flb_plg_error(ctx->ins, "error getting blob upstream");
+        return NULL;
+    }
+
+    /* Validate that upstream is properly initialized */
+    if (!u_node->u) {
+        flb_plg_error(ctx->ins, "upstream data is null");
+        return NULL;
+    }
+
+    /* Configure connection timeout */
+    u_node->u->base.net.connect_timeout = ctx->ingestion_endpoint_connect_timeout;
+
+    /* Configure buffering mode */
+    if (ctx->buffering_enabled == FLB_TRUE) {
+        u_node->u->base.flags &= ~(FLB_IO_ASYNC);
+        u_node->u->base.net.io_timeout = ctx->io_timeout;
+    }
+
+    flb_plg_debug(ctx->ins, "azure_kusto_create_blob -- async flag is %d",
+                  flb_stream_is_async(&ctx->u->base));
+
+    /* Get an upstream connection */
+    u_conn = flb_upstream_conn_get(u_node->u);
+    if (!u_conn) {
+        flb_plg_error(ctx->ins, "error getting blob container upstream connection");
+        return NULL;
+    }
+
+    /* Lock for thread safety during URI creation */
+    if (pthread_mutex_lock(&ctx->blob_mutex)) {
+        flb_plg_error(ctx->ins, "error locking blob mutex");
+        flb_upstream_conn_release(u_conn);
+        return NULL;
+    }
+
+    /* Create the blob URI */
+    uri = azure_kusto_create_blob_uri(ctx, u_node, blob_id);
+
+    /* Always unlock the mutex as soon as possible */
+    if (pthread_mutex_unlock(&ctx->blob_mutex)) {
+        flb_plg_error(ctx->ins, "error unlocking blob mutex");
+        /* Continue execution, as the critical section is done */
+    }
+
+    if (!uri) {
+        flb_plg_error(ctx->ins, "error creating blob container uri buffer");
+        flb_upstream_conn_release(u_conn);
+        return NULL;
+    }
+
+    /* Create HTTP request */
+    flb_plg_info(ctx->ins, "azure_kusto: calling azure storage api with io_timeout=%d",
+                 u_conn->net->io_timeout);
+    flb_plg_debug(ctx->ins, "uploading payload to blob uri: %s", uri);
+
+    c = flb_http_client(u_conn, FLB_HTTP_PUT, uri, payload, payload_size, NULL, 0, NULL, 0);
+    if (!c) {
+        flb_plg_error(ctx->ins, "cannot create HTTP client context for blob container");
+        flb_upstream_conn_release(u_conn);
+        flb_sds_destroy(uri);
+        return NULL;
+    }
+
+    /* Add HTTP headers - checking return values to catch potential memory issues */
+    if (!flb_http_add_header(c, "User-Agent", 10, "Fluent-Bit", 10) ||
+        !flb_http_add_header(c, "Content-Type", 12, "application/json", 16) ||
+        !flb_http_add_header(c, "x-ms-blob-type", 14, "BlockBlob", 9) ||
+        !flb_http_add_header(c, "x-ms-date", 9, date_header, date_len) ||
+        !flb_http_add_header(c, "x-ms-version", 12, "2019-12-12", 10) ||
+        !flb_http_add_header(c, "x-ms-client-version", 19, FLB_VERSION_STR, strlen(FLB_VERSION_STR)) ||
+        !flb_http_add_header(c, "x-ms-app", 8, "Kusto.Fluent-Bit", 16) ||
+        !flb_http_add_header(c, "x-ms-user", 9, "Kusto.Fluent-Bit", 16)) {
+
+        flb_plg_error(ctx->ins, "failed to add HTTP headers");
+        flb_http_client_destroy(c);
+        flb_upstream_conn_release(u_conn);
+        flb_sds_destroy(uri);
+        return NULL;
+    }
+
+    /* Perform HTTP request */
+    ret = flb_http_do(c, &resp_size);
+
+    /* Check for success (HTTP 201 Created) */
+    if (ret == 0 && c->resp.status == 201) {
+        flb_plg_debug(ctx->ins, "blob created successfully: %s", uri);
+        /* Success - uri will be returned */
+    }
+    else {
+        /* Request failed */
+        if (c->resp.payload_size > 0) {
+            flb_plg_error(ctx->ins, "create blob request failed with status %d: %s",
+                          c->resp.status, c->resp.payload);
+        }
+        else {
+            flb_plg_error(ctx->ins, "create blob request failed with status: %d",
+                          c->resp.status);
+        }
+
+        /* Clean up the URI on failure - avoid double free later */
+        flb_sds_destroy(uri);
+        uri = NULL;
+    }
+
+    /* Always clean up HTTP client and connection */
+    flb_http_client_destroy(c);
+    flb_upstream_conn_release(u_conn);
+
+    return uri;  /* Will be NULL on failure */
+}
+
+static flb_sds_t azure_kusto_create_blob_ext(struct flb_azure_kusto *ctx, flb_sds_t blob_id,
+                                         flb_sds_t payload, size_t payload_size)
+{
+    int ret = -1;
+    flb_sds_t uri = NULL;
     struct flb_upstream_node *u_node;
     struct flb_forward_config *fc = NULL;
     struct flb_connection *u_conn = NULL;
