@@ -218,7 +218,7 @@ flb_sds_t execute_ingest_csl_command(struct flb_azure_kusto *ctx, const char *cs
                             ctx->ins,
                             "Kusto ingestion command request http_do=%i, HTTP Status: %i",
                             ret, c->resp.status);
-                    flb_plg_debug(ctx->ins, "Kusto ingestion command HTTP request payload: %.*s", (int)c->resp.payload_size, c->resp.payload);
+                    flb_plg_debug(ctx->ins, "Kusto ingestion command HTTP response payload: %.*s", (int)c->resp.payload_size, c->resp.payload);
 
                     if (ret == 0) {
                         if (c->resp.status == 200) {
