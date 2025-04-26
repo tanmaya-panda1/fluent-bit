@@ -680,95 +680,6 @@ static flb_sds_t azure_kusto_create_blob_id(struct flb_azure_kusto *ctx, flb_sds
     char *uuid = NULL;
     char timestamp[20]; /* Buffer for timestamp */
     char *generated_random_string = NULL;
-    int unify_tag_mode = FLB_FALSE; /* Track if generated_random_string is used for b64tag */
-
-    /* Allocate memory for the random string only if needed */
-    if (ctx->unify_tag) {
-        generated_random_string = flb_malloc(ctx->blob_uri_length + 1);
-        if (!generated_random_string) {
-            flb_errno();
-            flb_plg_error(ctx->ins, "failed to allocate memory for random string tag");
-            return NULL; /* Exit early if allocation fails */
-        }
-        unify_tag_mode = FLB_TRUE;
-    }
-
-    flb_time_get(&tm);
-    ms = ((tm.tm.tv_sec * 1000) + (tm.tm.tv_nsec / 1000000));
-
-    if (!unify_tag_mode) {
-        b64tag = base64_encode(tag, tag_len, &b64_len);
-        if (b64tag) {
-            /* remove trailing '=' */
-            while (b64_len && b64tag[b64_len - 1] == '=') {
-                b64tag[b64_len - 1] = '\0';
-                b64_len--;
-            }
-        }
-        else {
-            flb_plg_error(ctx->ins, "error encoding tag '%s' to base64", tag);
-            /* No generated_random_string to free here */
-            return NULL;
-        }
-    }
-    else {
-        generate_random_string(generated_random_string, ctx->blob_uri_length); /* Generate the random string */
-        b64tag = generated_random_string; /* Assign only if unify_tag is true */
-        /* No need for strlen here as b64tag is used directly in printf */
-    }
-
-    /* Get the current timestamp */
-    time_t now = time(NULL);
-    struct tm *tm_info = gmtime(&now);
-    strftime(timestamp, sizeof(timestamp), "%Y%m%d%H%M%S", tm_info);
-
-    /* Generate a UUID */
-    uuid = generate_uuid();
-    if (!uuid) {
-        flb_plg_error(ctx->ins, "error generating UUID");
-        if (!unify_tag_mode && b64tag) {
-            flb_free(b64tag); /* Free only if it was allocated by base64_encode */
-        }
-        if (generated_random_string) {
-            flb_free(generated_random_string); /* Free if allocated */
-        }
-        return NULL;
-    }
-
-    /* Use flb_sds_printf for dynamic allocation */
-    /* b64tag is guaranteed not to be NULL here if we reached this point */
-    blob_id = flb_sds_printf("flb__%s__%s__%s__%llu__%s__%s",
-                             ctx->database_name, ctx->table_name, b64tag, ms, timestamp, uuid);
-
-    if (!blob_id) { /* Check if allocation failed */
-        flb_plg_error(ctx->ins, "cannot create blob id buffer");
-        /* Fall through to cleanup */
-    }
-
-    /* Cleanup */
-    if (!unify_tag_mode && b64tag) {
-        flb_free(b64tag); /* Free only if it was allocated by base64_encode */
-    }
-    if (generated_random_string) {
-        flb_free(generated_random_string); /* Free if allocated */
-    }
-    flb_free(uuid); /* uuid is always allocated if we reach here without error */
-
-    return blob_id;
-}
-// ... rest of the file ...
-
-static flb_sds_t azure_kusto_create_blob_id_ext(struct flb_azure_kusto *ctx, flb_sds_t tag,
-                                            size_t tag_len)
-{
-    flb_sds_t blob_id = NULL;
-    struct flb_time tm;
-    uint64_t ms;
-    char *b64tag = NULL;
-    size_t b64_len = 0;
-    char *uuid = NULL;
-    char timestamp[20]; /* Buffer for timestamp */
-    char *generated_random_string = NULL;
 
     /* Allocate memory for the random string */
     generated_random_string = flb_malloc(ctx->blob_uri_length + 1);
@@ -810,6 +721,11 @@ static flb_sds_t azure_kusto_create_blob_id_ext(struct flb_azure_kusto *ctx, flb
         return NULL;
     }
 
+
+    flb_plg_debug(ctx->ins, "Creating blob_id with values: database_name=%s, table_name=%s, b64tag=%s, ms=%llu, timestamp=%s, uuid=%s",
+                  ctx->database_name, ctx->table_name, b64tag, ms, timestamp, uuid);
+
+
     /*blob_id = flb_sds_create_size(1024); *//* Ensure the size is restricted to 1024 characters *//*
     if (blob_id) {
         flb_sds_snprintf(&blob_id, 1024, "flb__%s__%s__%s__%llu__%s__%s",
@@ -818,6 +734,8 @@ static flb_sds_t azure_kusto_create_blob_id_ext(struct flb_azure_kusto *ctx, flb
     else {
         flb_plg_error(ctx->ins, "cannot create blob id buffer");
     }*/
+
+
 
     /* Use flb_sds_printf for dynamic allocation */
     blob_id = flb_sds_printf("flb__%s__%s__%s__%llu__%s__%s",
