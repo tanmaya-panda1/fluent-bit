@@ -721,12 +721,20 @@ static flb_sds_t azure_kusto_create_blob_id(struct flb_azure_kusto *ctx, flb_sds
         return NULL;
     }
 
-    blob_id = flb_sds_create_size(1024); /* Ensure the size is restricted to 1024 characters */
+    /*blob_id = flb_sds_create_size(1024); *//* Ensure the size is restricted to 1024 characters *//*
     if (blob_id) {
         flb_sds_snprintf(&blob_id, 1024, "flb__%s__%s__%s__%llu__%s__%s",
                          ctx->database_name, ctx->table_name, b64tag, ms, timestamp, uuid);
     }
     else {
+        flb_plg_error(ctx->ins, "cannot create blob id buffer");
+    }*/
+
+    /* Use flb_sds_printf for dynamic allocation */
+    blob_id = flb_sds_printf("flb__%s__%s__%s__%llu__%s__%s",
+                             ctx->database_name, ctx->table_name, b64tag, ms, timestamp, uuid);
+
+    if (!blob_id) { /* Check if allocation failed */
         flb_plg_error(ctx->ins, "cannot create blob id buffer");
     }
 
