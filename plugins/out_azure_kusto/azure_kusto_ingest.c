@@ -673,6 +673,208 @@ static flb_sds_t azure_kusto_create_blob_id(struct flb_azure_kusto *ctx, flb_sds
                                             size_t tag_len)
 {
     flb_sds_t blob_id = NULL;
+    flb_sds_t tmp = NULL;
+    struct flb_time tm;
+    uint64_t ms;
+    char *b64tag = NULL;
+    size_t b64_len = 0;
+    char *uuid = NULL;
+    char timestamp[20]; /* Buffer for timestamp */
+    char ms_str[32];    /* Buffer for ms value */
+    char *generated_random_string = NULL;
+
+    /* Allocate memory for the random string */
+    generated_random_string = flb_malloc(ctx->blob_uri_length + 1);
+    if (!generated_random_string) {
+        flb_plg_error(ctx->ins, "error allocating memory for random string");
+        return NULL;
+    }
+
+    flb_time_get(&tm);
+    ms = ((tm.tm.tv_sec * 1000) + (tm.tm.tv_nsec / 1000000));
+    snprintf(ms_str, sizeof(ms_str), "%llu", ms);
+
+    if (!ctx->unify_tag) {
+        b64tag = base64_encode(tag, tag_len, &b64_len);
+        if (b64tag) {
+            /* remove trailing '=' */
+            while (b64_len && b64tag[b64_len - 1] == '=') {
+                b64tag[b64_len - 1] = '\0';
+                b64_len--;
+            }
+        }
+        else {
+            flb_plg_error(ctx->ins, "error encoding tag '%s' to base64", tag);
+            flb_free(generated_random_string);
+            return NULL;
+        }
+    }
+    else {
+        generate_random_string(generated_random_string, ctx->blob_uri_length);
+        b64tag = generated_random_string;
+        b64_len = strlen(generated_random_string);
+    }
+
+    /* Get the current timestamp */
+    time_t now = time(NULL);
+    struct tm *tm_info = gmtime(&now);
+    strftime(timestamp, sizeof(timestamp), "%Y%m%d%H%M%S", tm_info);
+
+    /* Generate a UUID */
+    uuid = generate_uuid();
+    if (!uuid) {
+        flb_plg_error(ctx->ins, "error generating UUID");
+        if (!ctx->unify_tag && b64tag) {
+            flb_free(b64tag);
+        }
+        flb_free(generated_random_string);
+        return NULL;
+    }
+
+    flb_plg_debug(ctx->ins, "Creating blob_id with values: database_name=%s, table_name=%s, b64tag=%s, ms=%s, timestamp=%s, uuid=%s",
+                  ctx->database_name, ctx->table_name, b64tag, ms_str, timestamp, uuid);
+
+    /* Build the blob_id incrementally to avoid memory allocation failures */
+
+    /* Start with the prefix */
+    blob_id = flb_sds_create("flb__");
+    if (!blob_id) {
+        flb_plg_error(ctx->ins, "failed to create blob_id string");
+        goto cleanup;
+    }
+
+    /* Add database_name */
+    if (ctx->database_name) {
+        tmp = flb_sds_cat(blob_id, ctx->database_name, strlen(ctx->database_name));
+        if (!tmp) {
+            flb_plg_error(ctx->ins, "failed to append database_name to blob_id");
+            flb_sds_destroy(blob_id);
+            blob_id = NULL;
+            goto cleanup;
+        }
+        blob_id = tmp;
+    }
+
+    /* Add separator and table_name */
+    tmp = flb_sds_cat(blob_id, "__", 2);
+    if (!tmp) {
+        flb_plg_error(ctx->ins, "failed to append separator to blob_id");
+        flb_sds_destroy(blob_id);
+        blob_id = NULL;
+        goto cleanup;
+    }
+    blob_id = tmp;
+
+    if (ctx->table_name) {
+        tmp = flb_sds_cat(blob_id, ctx->table_name, strlen(ctx->table_name));
+        if (!tmp) {
+            flb_plg_error(ctx->ins, "failed to append table_name to blob_id");
+            flb_sds_destroy(blob_id);
+            blob_id = NULL;
+            goto cleanup;
+        }
+        blob_id = tmp;
+    }
+
+    /* Add separator and b64tag */
+    tmp = flb_sds_cat(blob_id, "__", 2);
+    if (!tmp) {
+        flb_plg_error(ctx->ins, "failed to append separator to blob_id");
+        flb_sds_destroy(blob_id);
+        blob_id = NULL;
+        goto cleanup;
+    }
+    blob_id = tmp;
+
+    if (b64tag) {
+        tmp = flb_sds_cat(blob_id, b64tag, b64_len);
+        if (!tmp) {
+            flb_plg_error(ctx->ins, "failed to append b64tag to blob_id");
+            flb_sds_destroy(blob_id);
+            blob_id = NULL;
+            goto cleanup;
+        }
+        blob_id = tmp;
+    }
+
+    /* Add separator and ms */
+    tmp = flb_sds_cat(blob_id, "__", 2);
+    if (!tmp) {
+        flb_plg_error(ctx->ins, "failed to append separator to blob_id");
+        flb_sds_destroy(blob_id);
+        blob_id = NULL;
+        goto cleanup;
+    }
+    blob_id = tmp;
+
+    tmp = flb_sds_cat(blob_id, ms_str, strlen(ms_str));
+    if (!tmp) {
+        flb_plg_error(ctx->ins, "failed to append ms to blob_id");
+        flb_sds_destroy(blob_id);
+        blob_id = NULL;
+        goto cleanup;
+    }
+    blob_id = tmp;
+
+    /* Add separator and timestamp */
+    tmp = flb_sds_cat(blob_id, "__", 2);
+    if (!tmp) {
+        flb_plg_error(ctx->ins, "failed to append separator to blob_id");
+        flb_sds_destroy(blob_id);
+        blob_id = NULL;
+        goto cleanup;
+    }
+    blob_id = tmp;
+
+    tmp = flb_sds_cat(blob_id, timestamp, strlen(timestamp));
+    if (!tmp) {
+        flb_plg_error(ctx->ins, "failed to append timestamp to blob_id");
+        flb_sds_destroy(blob_id);
+        blob_id = NULL;
+        goto cleanup;
+    }
+    blob_id = tmp;
+
+    /* Add separator and uuid */
+    tmp = flb_sds_cat(blob_id, "__", 2);
+    if (!tmp) {
+        flb_plg_error(ctx->ins, "failed to append separator to blob_id");
+        flb_sds_destroy(blob_id);
+        blob_id = NULL;
+        goto cleanup;
+    }
+    blob_id = tmp;
+
+    if (uuid) {
+        tmp = flb_sds_cat(blob_id, uuid, strlen(uuid));
+        if (!tmp) {
+            flb_plg_error(ctx->ins, "failed to append uuid to blob_id");
+            flb_sds_destroy(blob_id);
+            blob_id = NULL;
+            goto cleanup;
+        }
+        blob_id = tmp;
+    }
+
+    cleanup:
+    /* Clean up resources */
+    if (!ctx->unify_tag && b64tag) {
+        flb_free(b64tag);
+    }
+    flb_free(uuid);
+    flb_free(generated_random_string);
+
+    if (!blob_id) {
+        flb_plg_error(ctx->ins, "failed to create blob_id");
+    }
+
+    return blob_id;
+}
+
+static flb_sds_t azure_kusto_create_blob_id_ext(struct flb_azure_kusto *ctx, flb_sds_t tag,
+                                            size_t tag_len)
+{
+    flb_sds_t blob_id = NULL;
     struct flb_time tm;
     uint64_t ms;
     char *b64tag = NULL;
@@ -680,6 +882,7 @@ static flb_sds_t azure_kusto_create_blob_id(struct flb_azure_kusto *ctx, flb_sds
     char *uuid = NULL;
     char timestamp[20]; /* Buffer for timestamp */
     char *generated_random_string = NULL;
+    size_t blob_id_size = 0;
 
     /* Allocate memory for the random string */
     generated_random_string = flb_malloc(ctx->blob_uri_length + 1);
@@ -721,11 +924,6 @@ static flb_sds_t azure_kusto_create_blob_id(struct flb_azure_kusto *ctx, flb_sds
         return NULL;
     }
 
-
-    flb_plg_debug(ctx->ins, "Creating blob_id with values: database_name=%s, table_name=%s, b64tag=%s, ms=%llu, timestamp=%s, uuid=%s",
-                  ctx->database_name, ctx->table_name, b64tag, ms, timestamp, uuid);
-
-
     /*blob_id = flb_sds_create_size(1024); *//* Ensure the size is restricted to 1024 characters *//*
     if (blob_id) {
         flb_sds_snprintf(&blob_id, 1024, "flb__%s__%s__%s__%llu__%s__%s",
@@ -734,8 +932,6 @@ static flb_sds_t azure_kusto_create_blob_id(struct flb_azure_kusto *ctx, flb_sds
     else {
         flb_plg_error(ctx->ins, "cannot create blob id buffer");
     }*/
-
-
 
     /* Use flb_sds_printf for dynamic allocation */
     blob_id = flb_sds_printf("flb__%s__%s__%s__%llu__%s__%s",
