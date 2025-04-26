@@ -56,10 +56,7 @@ static int azure_kusto_get_msi_token(struct flb_azure_kusto *ctx)
 static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
 {
     int ret;
-    char *token;
-
-    /* Clear any previous oauth2 payload content */
-    flb_oauth2_payload_clear(ctx->o);
+    char *token = NULL;
 
     /* If using workload identity, handle token exchange */
     if (ctx->auth_type == FLB_AZURE_KUSTO_AUTH_WORKLOAD_IDENTITY) {
@@ -70,6 +67,9 @@ static int azure_kusto_get_oauth2_token(struct flb_azure_kusto *ctx)
         }
         return 0;
     }
+
+    /* Clear any previous oauth2 payload content */
+    flb_oauth2_payload_clear(ctx->o);
 
     ret = flb_oauth2_payload_append(ctx->o, "grant_type", 10, "client_credentials", 18);
     if (ret == -1) {
