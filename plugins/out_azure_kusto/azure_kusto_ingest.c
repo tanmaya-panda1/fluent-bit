@@ -218,6 +218,15 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
         flb_sds_destroy(uri);
         return NULL;
     }
+    
+    /* Add extra check for u_conn->net which seems to be causing the SIGSEGV */
+    if (!u_conn->net) {
+        flb_plg_error(ctx->ins, "error: u_conn->net is NULL");
+        flb_upstream_conn_release(u_conn);
+        flb_sds_destroy(uri);
+        return NULL;
+    }
+    
     flb_plg_debug(ctx->ins, "successfully got upstream connection");
 
     /* Create and configure HTTP request */
