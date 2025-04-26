@@ -604,7 +604,7 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
                                     parse_ingestion_identity_token(ctx, response);
 
                             if (identity_token) {
-                                /* Clean any existing resources first to prevent memory leaks */
+                                /* Clean any existing resources first to prevent memory leaks *//*
                                 if (ctx->resources->blob_ha) {
                                     flb_upstream_ha_destroy(ctx->resources->blob_ha);
                                 }
@@ -613,7 +613,7 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
                                 }
                                 if (ctx->resources->identity_token) {
                                     flb_sds_destroy(ctx->resources->identity_token);
-                                }
+                                }*/
                                 
                                 ctx->resources->blob_ha = blob_ha;
                                 ctx->resources->queue_ha = queue_ha;
