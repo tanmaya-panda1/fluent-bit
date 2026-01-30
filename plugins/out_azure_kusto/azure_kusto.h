@@ -131,10 +131,16 @@ struct flb_azure_kusto {
     /* mutex for acquiring oauth tokens */
     pthread_mutex_t token_mutex;
 
-    /* ingestion resources */
+    /* 
+     * Ingestion resources - using double-buffered approach to prevent
+     * race conditions when refreshing resources. The old_resources pointer
+     * holds the previous resources that will be freed on the next refresh
+     * cycle, ensuring no thread is still using them.
+     */
     struct flb_azure_kusto_resources *resources;
+    struct flb_azure_kusto_resources *old_resources;  /* previous resources pending cleanup */
 
-    /* mutex for loading reosurces */
+    /* mutex for loading resources */
     pthread_mutex_t resources_mutex;
 
     pthread_mutex_t blob_mutex;

@@ -181,7 +181,7 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
     flb_plg_debug(ctx->ins,"inside blob after upstream ha node get :: after getting connection");
     if (u_conn) {
         if (pthread_mutex_lock(&ctx->blob_mutex)) {
-            flb_plg_error(ctx->ins, "error unlocking mutex");
+            flb_plg_error(ctx->ins, "error locking mutex");
             goto cleanup;
         }
 
@@ -208,7 +208,6 @@ static flb_sds_t azure_kusto_create_blob(struct flb_azure_kusto *ctx, flb_sds_t 
                 flb_http_add_header(c, "x-ms-client-version", 19, FLB_VERSION_STR, strlen(FLB_VERSION_STR));
                 flb_http_add_header(c, "x-ms-app", 8, "Kusto.Fluent-Bit", 16);
                 flb_http_add_header(c, "x-ms-user", 9, "Kusto.Fluent-Bit", 16);
-
 
                 ret = flb_http_do(c, &resp_size);
                 flb_plg_debug(ctx->ins,
@@ -283,9 +282,8 @@ static flb_sds_t create_ingestion_message(struct flb_azure_kusto *ctx, flb_sds_t
     size_t b64_len;
     size_t message_len;
 
-
     if (pthread_mutex_lock(&ctx->blob_mutex)) {
-        flb_plg_error(ctx->ins, "error unlocking mutex");
+        flb_plg_error(ctx->ins, "error locking mutex");
         return NULL;
     }
 
@@ -355,9 +353,12 @@ static flb_sds_t create_ingestion_message(struct flb_azure_kusto *ctx, flb_sds_t
         flb_plg_error(ctx->ins, "error generating unique ingestion UUID");
     }
 
-
     if (pthread_mutex_unlock(&ctx->blob_mutex)) {
         flb_plg_error(ctx->ins, "error unlocking mutex");
+        /* Free message if created to prevent memory leak on unlock failure */
+        if (message) {
+            flb_sds_destroy(message);
+        }
         return NULL;
     }
 
@@ -410,7 +411,7 @@ static int azure_kusto_enqueue_ingestion(struct flb_azure_kusto *ctx, flb_sds_t 
     struct flb_upstream_node *u_node;
     struct flb_connection *u_conn;
     struct flb_http_client *c;
-    flb_sds_t uri;
+    flb_sds_t uri = NULL;
     flb_sds_t payload;
     size_t resp_size;
     time_t now;
@@ -438,13 +439,18 @@ static int azure_kusto_enqueue_ingestion(struct flb_azure_kusto *ctx, flb_sds_t 
 
     if (u_conn) {
         if (pthread_mutex_lock(&ctx->blob_mutex)) {
-            flb_plg_error(ctx->ins, "error unlocking mutex");
+            flb_plg_error(ctx->ins, "error locking mutex");
+            flb_upstream_conn_release(u_conn);
             return -1;
         }
         uri = azure_kusto_create_queue_uri(ctx, u_node);
 
         if (pthread_mutex_unlock(&ctx->blob_mutex)) {
             flb_plg_error(ctx->ins, "error unlocking mutex");
+            if (uri) {
+                flb_sds_destroy(uri);
+            }
+            flb_upstream_conn_release(u_conn);
             return -1;
         }
 
@@ -536,6 +542,15 @@ void generate_random_string(char *str, size_t length)
     str[length] = '\0';
 }
 
+/*
+ * Creates a unique blob ID for Azure Kusto ingestion.
+ * 
+ * MEMORY MANAGEMENT:
+ * - When unify_tag is false: b64tag is allocated by base64_encode and must be freed
+ * - When unify_tag is true: generated_random_string is allocated and b64tag points to it
+ * 
+ * This function properly manages memory allocation to prevent leaks.
+ */
 static flb_sds_t azure_kusto_create_blob_id(struct flb_azure_kusto *ctx, flb_sds_t tag,
                                             size_t tag_len)
 {
@@ -548,12 +563,11 @@ static flb_sds_t azure_kusto_create_blob_id(struct flb_azure_kusto *ctx, flb_sds
     char timestamp[20]; /* Buffer for timestamp */
     char *generated_random_string = NULL;
 
-    /* Allocate memory for the random string */
-    generated_random_string = flb_malloc(ctx->blob_uri_length + 1);
     flb_time_get(&tm);
     ms = ((tm.tm.tv_sec * 1000) + (tm.tm.tv_nsec / 1000000));
 
     if (!ctx->unify_tag) {
+        /* When not using unified tag, encode the tag to base64 */
         b64tag = base64_encode(tag, tag_len, &b64_len);
         if (b64tag) {
             /* remove trailing '=' */
@@ -568,7 +582,14 @@ static flb_sds_t azure_kusto_create_blob_id(struct flb_azure_kusto *ctx, flb_sds
         }
     }
     else {
-        generate_random_string(generated_random_string, ctx->blob_uri_length); /* Generate the random string */
+        /* When using unified tag, allocate and generate a random string */
+        generated_random_string = flb_malloc(ctx->blob_uri_length + 1);
+        if (!generated_random_string) {
+            flb_errno();
+            flb_plg_error(ctx->ins, "error allocating random string buffer");
+            return NULL;
+        }
+        generate_random_string(generated_random_string, ctx->blob_uri_length);
         b64tag = generated_random_string;
         b64_len = strlen(generated_random_string);
     }
@@ -582,8 +603,16 @@ static flb_sds_t azure_kusto_create_blob_id(struct flb_azure_kusto *ctx, flb_sds
     uuid = generate_uuid();
     if (!uuid) {
         flb_plg_error(ctx->ins, "error generating UUID");
-        if (!ctx->unify_tag && b64tag) {
-            flb_free(b64tag);
+        /* Cleanup based on which allocation was done */
+        if (!ctx->unify_tag) {
+            if (b64tag) {
+                flb_free(b64tag);
+            }
+        }
+        else {
+            if (generated_random_string) {
+                flb_free(generated_random_string);
+            }
         }
         return NULL;
     }
@@ -597,11 +626,27 @@ static flb_sds_t azure_kusto_create_blob_id(struct flb_azure_kusto *ctx, flb_sds
         flb_plg_error(ctx->ins, "cannot create blob id buffer");
     }
 
-    if (!ctx->unify_tag && b64tag) {
-        flb_free(b64tag);
+    /* 
+     * Cleanup: properly handle memory based on which path was taken.
+     * When unify_tag is true, b64tag points to generated_random_string,
+     * so we only free generated_random_string.
+     * When unify_tag is false, b64tag points to the base64 encoded result
+     * which needs to be freed separately.
+     */
+    if (!ctx->unify_tag) {
+        if (b64tag) {
+            flb_free(b64tag);
+        }
     }
-    flb_free(uuid);
-    flb_free(generated_random_string);
+    else {
+        if (generated_random_string) {
+            flb_free(generated_random_string);
+        }
+    }
+    
+    if (uuid) {
+        flb_free(uuid);
+    }
 
     return blob_id;
 }
@@ -610,21 +655,23 @@ int azure_kusto_queued_ingestion(struct flb_azure_kusto *ctx, flb_sds_t tag,
                                  size_t tag_len, flb_sds_t payload, size_t payload_size, struct azure_kusto_file *upload_file )
 {
     int ret = -1;
-    flb_sds_t blob_id;
+    flb_sds_t blob_id = NULL;
     flb_sds_t blob_uri;
 
-
     if (pthread_mutex_lock(&ctx->blob_mutex)) {
-        flb_plg_error(ctx->ins, "error unlocking mutex");
+        flb_plg_error(ctx->ins, "error locking mutex");
         return -1;
     }
 
     /* flb__<db>__<table>__<b64tag>__<timestamp> */
     blob_id = azure_kusto_create_blob_id(ctx, tag, tag_len);
 
-
     if (pthread_mutex_unlock(&ctx->blob_mutex)) {
         flb_plg_error(ctx->ins, "error unlocking mutex");
+        /* Free blob_id if created to prevent memory leak on unlock failure */
+        if (blob_id) {
+            flb_sds_destroy(blob_id);
+        }
         return -1;
     }
 

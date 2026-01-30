@@ -535,8 +535,11 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
     flb_sds_t identity_token = NULL;
     struct flb_upstream_ha *blob_ha = NULL;
     struct flb_upstream_ha *queue_ha = NULL;
+    struct flb_azure_kusto_resources *new_resources = NULL;
+    struct flb_azure_kusto_resources *old_to_free = NULL;
     struct flb_time tm_now;
     uint64_t now;
+    int resources_valid = FLB_FALSE;
 
     int generated_random_integer = azure_kusto_generate_random_integer();
     flb_plg_debug(ctx->ins, "generated random integer %d", generated_random_integer);
@@ -548,135 +551,155 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
     flb_plg_debug(ctx->ins, "difference is  %llu", now - ctx->resources->load_time);
     flb_plg_debug(ctx->ins, "effective ingestion resource interval is %d", ctx->ingestion_resources_refresh_interval * 1000 + generated_random_integer);
 
-    /* check if we have all resources and they are not stale */
+    /*
+     * First, check if we can free old_resources from previous refresh.
+     * This is safe because by now (after at least one refresh interval),
+     * no thread should be using them anymore.
+     */
+    if (pthread_mutex_lock(&ctx->resources_mutex)) {
+        flb_plg_error(ctx->ins, "error locking mutex for old resources cleanup");
+        return -1;
+    }
+    if (ctx->old_resources) {
+        old_to_free = ctx->old_resources;
+        ctx->old_resources = NULL;
+        flb_plg_debug(ctx->ins, "cleaning up old resources from previous refresh cycle");
+    }
+    if (pthread_mutex_unlock(&ctx->resources_mutex)) {
+        flb_plg_error(ctx->ins, "error unlocking mutex after old resources cleanup");
+        return -1;
+    }
+
+    /* Free old resources outside the mutex to avoid holding the lock too long */
+    if (old_to_free) {
+        flb_azure_kusto_resources_clear(old_to_free);
+        flb_free(old_to_free);
+        old_to_free = NULL;
+    }
+
+    /* Check if current resources are still valid (under mutex for consistency) */
+    if (pthread_mutex_lock(&ctx->resources_mutex)) {
+        flb_plg_error(ctx->ins, "error locking mutex for resources check");
+        return -1;
+    }
     if (ctx->resources->blob_ha && ctx->resources->queue_ha &&
         ctx->resources->identity_token &&
         now - ctx->resources->load_time < ctx->ingestion_resources_refresh_interval * 1000 + generated_random_integer) {
+        resources_valid = FLB_TRUE;
+    }
+    if (pthread_mutex_unlock(&ctx->resources_mutex)) {
+        flb_plg_error(ctx->ins, "error unlocking mutex after resources check");
+        return -1;
+    }
+
+    if (resources_valid == FLB_TRUE) {
         flb_plg_debug(ctx->ins, "resources are already loaded and are not stale");
-        ret = 0;
-    }
-    else {
-        flb_plg_info(ctx->ins, "loading kusto ingestion resources and refresh interval is %d", ctx->ingestion_resources_refresh_interval * 1000 + generated_random_integer);
-        response = execute_ingest_csl_command(ctx, ".get ingestion resources");
-
-        if (response) {
-            queue_ha = flb_upstream_ha_create("azure_kusto_queue_ha");
-
-            if (queue_ha) {
-                blob_ha = flb_upstream_ha_create("azure_kusto_blob_ha");
-
-                if (blob_ha) {
-
-                    if (pthread_mutex_lock(&ctx->resources_mutex)) {
-                        flb_plg_error(ctx->ins, "error locking mutex");
-                        ret = -1;
-                        goto cleanup;
-                    }
-                    ret =
-                            parse_storage_resources(ctx, config, response, blob_ha, queue_ha);
-
-                    if (pthread_mutex_unlock(&ctx->resources_mutex)) {
-                        flb_plg_error(ctx->ins, "error unlocking mutex");
-                        ret = -1;
-                        goto cleanup;
-                    }
-
-                    if (ret == 0) {
-                        flb_sds_destroy(response);
-                        response = NULL;
-
-                        response =
-                                execute_ingest_csl_command(ctx, ".get kusto identity token");
-
-                        if (response) {
-                            if (pthread_mutex_lock(&ctx->resources_mutex)) {
-                                flb_plg_error(ctx->ins, "error locking mutex");
-                                ret = -1;
-                                goto cleanup;
-                            }
-                            identity_token =
-                                    parse_ingestion_identity_token(ctx, response);
-
-                            if (identity_token) {
-                                ctx->resources->blob_ha = blob_ha;
-                                ctx->resources->queue_ha = queue_ha;
-                                ctx->resources->identity_token = identity_token;
-                                ctx->resources->load_time = now;
-
-                                ret = 0;
-                            }
-                            else {
-                                flb_plg_error(ctx->ins,
-                                              "error parsing ingestion identity token");
-                                ret = -1;
-                                goto cleanup;
-                            }
-                            if (pthread_mutex_unlock(&ctx->resources_mutex)) {
-                                flb_plg_error(ctx->ins, "error unlocking mutex");
-                                ret = -1;
-                                goto cleanup;
-                            }
-                        }
-                        else {
-                            flb_plg_error(ctx->ins, "error getting kusto identity token");
-                            ret = -1;
-                            goto cleanup;
-                        }
-                    }
-                    else {
-                        flb_plg_error(ctx->ins,
-                                      "error parsing ingestion storage resources");
-                        ret = -1;
-                        goto cleanup;
-                    }
-
-                    if (ret == -1) {
-                        flb_upstream_ha_destroy(blob_ha);
-                        blob_ha = NULL;
-                    }
-                }
-                else {
-                    flb_plg_error(ctx->ins, "error creating storage resources upstreams");
-                    ret = -1;
-                    goto cleanup;
-                }
-
-                if (ret == -1) {
-                    flb_upstream_ha_destroy(queue_ha);
-                    queue_ha = NULL;
-                }
-            }
-            else {
-                flb_plg_error(ctx->ins, "error creating storage resources upstreams");
-                ret = -1;
-                goto cleanup;
-            }
-
-            if (response) {
-                flb_sds_destroy(response);
-            }
-        }
-        if (!response) {
-            flb_plg_error(ctx->ins, "error getting ingestion storage resources");
-            ret = -1;
-            goto cleanup;
-        }
+        return 0;
     }
 
-    cleanup:
-    if (ret == -1) {
-        if (queue_ha) {
-            flb_upstream_ha_destroy(queue_ha);
-        }
-        if (blob_ha) {
-            flb_upstream_ha_destroy(blob_ha);
-        }
-        if (response) {
-            flb_sds_destroy(response);
-        }
-        if (identity_token) {
-            flb_sds_destroy(identity_token);
-        }
+    /* Resources are stale or missing, need to reload */
+    flb_plg_info(ctx->ins, "loading kusto ingestion resources and refresh interval is %d", 
+                 ctx->ingestion_resources_refresh_interval * 1000 + generated_random_integer);
+
+    /* Allocate new resources structure */
+    new_resources = flb_calloc(1, sizeof(struct flb_azure_kusto_resources));
+    if (!new_resources) {
+        flb_errno();
+        flb_plg_error(ctx->ins, "error allocating new resources structure");
+        return -1;
+    }
+
+    response = execute_ingest_csl_command(ctx, ".get ingestion resources");
+    if (!response) {
+        flb_plg_error(ctx->ins, "error getting ingestion storage resources");
+        goto cleanup;
+    }
+
+    queue_ha = flb_upstream_ha_create("azure_kusto_queue_ha");
+    if (!queue_ha) {
+        flb_plg_error(ctx->ins, "error creating queue HA upstream");
+        goto cleanup;
+    }
+
+    blob_ha = flb_upstream_ha_create("azure_kusto_blob_ha");
+    if (!blob_ha) {
+        flb_plg_error(ctx->ins, "error creating blob HA upstream");
+        goto cleanup;
+    }
+
+    ret = parse_storage_resources(ctx, config, response, blob_ha, queue_ha);
+    if (ret != 0) {
+        flb_plg_error(ctx->ins, "error parsing ingestion storage resources");
+        goto cleanup;
+    }
+
+    flb_sds_destroy(response);
+    response = NULL;
+
+    response = execute_ingest_csl_command(ctx, ".get kusto identity token");
+    if (!response) {
+        flb_plg_error(ctx->ins, "error getting kusto identity token");
+        ret = -1;
+        goto cleanup;
+    }
+
+    identity_token = parse_ingestion_identity_token(ctx, response);
+    if (!identity_token) {
+        flb_plg_error(ctx->ins, "error parsing ingestion identity token");
+        ret = -1;
+        goto cleanup;
+    }
+
+    /* Set up new resources structure */
+    new_resources->blob_ha = blob_ha;
+    new_resources->queue_ha = queue_ha;
+    new_resources->identity_token = identity_token;
+    new_resources->load_time = now;
+
+    /* 
+     * Atomic swap: move current resources to old_resources (for later cleanup),
+     * and set new_resources as current. This ensures threads currently using
+     * the old resources can continue safely until the next refresh cycle.
+     */
+    if (pthread_mutex_lock(&ctx->resources_mutex)) {
+        flb_plg_error(ctx->ins, "error locking mutex for resource swap");
+        ret = -1;
+        goto cleanup;
+    }
+
+    /* Save old resources for deferred cleanup (will be freed on next refresh) */
+    ctx->old_resources = ctx->resources;
+    /* Swap in the new resources */
+    ctx->resources = new_resources;
+
+    if (pthread_mutex_unlock(&ctx->resources_mutex)) {
+        flb_plg_error(ctx->ins, "error unlocking mutex after resource swap");
+        /* Don't return error here as swap already happened */
+    }
+
+    flb_plg_info(ctx->ins, "successfully loaded new kusto ingestion resources");
+
+    if (response) {
+        flb_sds_destroy(response);
+    }
+
+    return 0;
+
+cleanup:
+    if (queue_ha) {
+        flb_upstream_ha_destroy(queue_ha);
+    }
+    if (blob_ha) {
+        flb_upstream_ha_destroy(blob_ha);
+    }
+    if (response) {
+        flb_sds_destroy(response);
+    }
+    if (identity_token) {
+        flb_sds_destroy(identity_token);
+    }
+    if (new_resources) {
+        flb_free(new_resources);
     }
 
     return ret;
@@ -843,6 +866,9 @@ struct flb_azure_kusto *flb_azure_kusto_conf_create(struct flb_output_instance *
         return NULL;
     }
 
+    /* Initialize old_resources to NULL (used for double-buffered resource management) */
+    ctx->old_resources = NULL;
+
     flb_plg_info(ctx->ins, "endpoint='%s', database='%s', table='%s'",
                  ctx->ingestion_endpoint, ctx->database_name, ctx->table_name);
 
@@ -865,6 +891,12 @@ int flb_azure_kusto_conf_destroy(struct flb_azure_kusto *ctx)
     if (ctx->o) {
         flb_oauth2_destroy(ctx->o);
         ctx->o = NULL;
+    }
+
+    /* Clean up old_resources if any pending from previous refresh cycle */
+    if (ctx->old_resources) {
+        flb_azure_kusto_resources_destroy(ctx->old_resources);
+        ctx->old_resources = NULL;
     }
 
     if (ctx->resources) {
