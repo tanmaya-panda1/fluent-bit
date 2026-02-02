@@ -2,7 +2,7 @@
 
 /*  Fluent Bit
  *  ==========
- *  Copyright (C) 2015-2024 The Fluent Bit Authors
+ *  Copyright (C) 2015-2026 The Fluent Bit Authors
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -86,6 +86,25 @@ static int in_http_init(struct flb_input_instance *ins,
         flb_plg_error(ctx->ins, "configuration error");
         http_config_destroy(ctx);
         return -1;
+    }
+
+    if (ctx->oauth2_cfg.validate) {
+        if (!ctx->oauth2_cfg.issuer || !ctx->oauth2_cfg.jwks_url) {
+            flb_plg_error(ctx->ins, "oauth2.issuer and oauth2.jwks_url are required when oauth2.validate is enabled");
+            http_config_destroy(ctx);
+            return -1;
+        }
+
+        if (ctx->oauth2_cfg.jwks_refresh_interval <= 0) {
+            ctx->oauth2_cfg.jwks_refresh_interval = 300;
+        }
+
+        ctx->oauth2_ctx = flb_oauth2_jwt_context_create(config, &ctx->oauth2_cfg);
+        if (!ctx->oauth2_ctx) {
+            flb_plg_error(ctx->ins, "unable to create oauth2 jwt context");
+            http_config_destroy(ctx);
+            return -1;
+        }
     }
 
     /* Set the context */

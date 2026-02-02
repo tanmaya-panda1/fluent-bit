@@ -6,9 +6,9 @@ cmake_policy(SET CMP0069 NEW)
 set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
 
 # Fluent Bit Version
-set(FLB_VERSION_MAJOR  4)
-set(FLB_VERSION_MINOR  2)
-set(FLB_VERSION_PATCH  2)
+set(FLB_VERSION_MAJOR  5)
+set(FLB_VERSION_MINOR  0)
+set(FLB_VERSION_PATCH  0)
 set(FLB_VERSION_STR "${FLB_VERSION_MAJOR}.${FLB_VERSION_MINOR}.${FLB_VERSION_PATCH}")
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -850,13 +850,15 @@ endif()
 
 # AWS MSK IAM detection (must come after Kafka section)
 if(FLB_AWS AND FLB_KAFKA)
-  # Check if Kafka SASL support was detected
-  if(DEFINED FLB_SASL_ENABLED AND FLB_SASL_ENABLED)
+  # Check if Kafka OAuth Bearer support was detected
+  # On Windows: uses SSPI (no Cyrus SASL needed, just SSL)
+  # On Linux/macOS: uses Cyrus SASL (libsasl2)
+  if(DEFINED FLB_KAFKA_MSK_IAM_ENABLED AND FLB_KAFKA_MSK_IAM_ENABLED)
     set(FLB_HAVE_AWS_MSK_IAM ON)  # Set CMake variable
     FLB_DEFINITION(FLB_HAVE_AWS_MSK_IAM)  # Set preprocessor definition
     message(STATUS "AWS MSK IAM authentication: ENABLED")
   else()
-    message(STATUS "AWS MSK IAM authentication: DISABLED (requires Kafka with libsasl2)")
+    message(STATUS "AWS MSK IAM authentication: DISABLED (requires Kafka with OAuth Bearer support)")
   endif()
 else()
   if(FLB_AWS AND NOT FLB_KAFKA)

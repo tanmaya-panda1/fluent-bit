@@ -2,7 +2,7 @@
 
 /*  Fluent Bit
  *  ==========
- *  Copyright (C) 2015-2024 The Fluent Bit Authors
+ *  Copyright (C) 2015-2026 The Fluent Bit Authors
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -1084,6 +1084,18 @@ static struct flb_config_map config_map[] = {
      FLB_CONFIG_MAP_STR, "db.sync", "normal",
      0, FLB_FALSE, 0,
      "set a database sync method. values: extra, full, normal and off."
+    },
+    {
+     FLB_CONFIG_MAP_BOOL, "db.locking", "false",
+     0, FLB_TRUE, offsetof(struct k8s_events, db_locking),
+     "set exclusive locking mode, increase performance but don't allow "
+     "external connections to the database file."
+    },
+    {
+     FLB_CONFIG_MAP_STR, "db.journal_mode", "WAL",
+     0, FLB_TRUE, offsetof(struct k8s_events, db_journal_mode),
+     "set the journal mode for the database. values: DELETE, TRUNCATE, "
+     "PERSIST, MEMORY, WAL, OFF."
     },
 #endif
 

@@ -66,6 +66,16 @@ def test_infer_multiple_prefixes():
     # At least one real component touched → build is optional
     assert build_optional is True
 
+def test_infer_prefix_fluent_bit_entrypoint():
+    """
+    Test that src/fluent-bit.c infers bin: prefix.
+
+    fluent-bit.c is the main entry point of the fluent-bit binary,
+    so commits touching this file should allow the 'bin:' prefix.
+    """
+    prefixes, build_optional = infer_prefix_from_paths(["src/fluent-bit.c"])
+    assert prefixes == {"bin:"}
+    assert build_optional is True
 
 # -----------------------------------------------------------
 # Tests: Bad Squash Detection
@@ -154,6 +164,46 @@ def test_valid_commit_multiple_signoffs_allowed():
         "Signed-off-by: User2",
         ["plugins/out_s3/s3.c"]
     )
+    ok, _ = validate_commit(commit)
+    assert ok is True
+
+
+def test_valid_commit_bin_prefix_for_fluent_bit():
+    """
+    Test that commits modifying src/fluent-bit.c allow the 'bin:' prefix.
+
+    The fluent-bit.c file represents the binary entry point, so using
+    'bin:' as the commit prefix should be valid.
+    """
+    commit = make_commit(
+        "bin: adjust startup behavior\n\nSigned-off-by: User",
+        ["src/fluent-bit.c"]
+    )
+    ok, _ = validate_commit(commit)
+    assert ok is True
+
+
+def test_valid_commit_with_fenced_code_block_in_body():
+    """
+    Commits containing fenced code blocks in the body should NOT fail validation.
+
+    Code blocks often include YAML, shell output, or logs that may look like
+    subject prefixes or configuration directives. These must be ignored by
+    the linter to avoid false positives.
+    """
+    commit = make_commit(
+        "out_s3: validate config earlier\n\n"
+        "This commit improves validation.\n\n"
+        "```yaml\n"
+        "pipeline:\n"
+        "  inputs:\n"
+        "    - name: dummy\n"
+        "      tag: test\n"
+        "```\n\n"
+        "Signed-off-by: User",
+        ["plugins/out_s3/s3.c"]
+    )
+
     ok, _ = validate_commit(commit)
     assert ok is True
 
@@ -561,11 +611,29 @@ def test_valid_test_file_changes():
     Generic prefixes like "tests:" are acceptable for test-related changes.
     """
     commit = make_commit(
-        "tests: add unit test\n\nSigned-off-by: User",
+        "tests: test_router: add unit test\n\nSigned-off-by: User",
         ["tests/unit/test_router.c"]
     )
     ok, _ = validate_commit(commit)
     assert ok is True
+
+
+def test_invalid_test_file_changes_without_umbrella_prefix():
+    """
+    Test that test file changes are disallowed without tests umbrella under tests components.
+
+
+    Test files (in tests/ directory) basically allows tests umbrella prefix.
+    Without "tests:" umbrella prefix are not acceptable for test-related changes.
+    """
+    commit = make_commit(
+        "test_router: add unit test\n\nSigned-off-by: User",
+        ["tests/internal/test_router.c"]
+    )
+    ok, msg = validate_commit(commit)
+    assert ok is False
+    assert "Expected one of: test_router:, tests:" in msg
+
 
 def test_valid_build_file_changes():
     """
@@ -593,6 +661,75 @@ def test_valid_config_file_changes():
     commit = make_commit(
         "config: update settings\n\nSigned-off-by: User",
         [".editorconfig"]
+    )
+    ok, _ = validate_commit(commit)
+    assert ok is True
+
+# -----------------------------------------------------------
+# config_format strict rules
+# -----------------------------------------------------------
+
+def test_valid_config_format_commit():
+    """
+    When files under src/config_format are modified, the subject MUST use
+    the umbrella prefix 'config_format:'.
+
+    This ensures config_format is treated as a logical subsystem rather than
+    exposing internal implementation names (cf_yaml, cf_fluentbit, etc.)
+    in commit subjects.
+    """
+    commit = make_commit(
+        "config_format: cf_yaml: fix include resolution\n\nSigned-off-by: User",
+        ["src/config_format/flb_cf_yaml.c"]
+    )
+    ok, _ = validate_commit(commit)
+    assert ok is True
+
+
+def test_error_cf_yaml_prefix_not_allowed():
+    """
+    Internal implementation prefixes like 'cf_yaml:' must NOT be allowed
+    as commit subjects when modifying src/config_format.
+
+    The umbrella prefix 'config_format:' must be used instead.
+    """
+    commit = make_commit(
+        "cf_yaml: fix include resolution\n\nSigned-off-by: User",
+        ["src/config_format/flb_cf_yaml.c"]
+    )
+    ok, msg = validate_commit(commit)
+    assert ok is False
+    assert "config_format:" in msg
+
+
+def test_error_yaml_prefix_not_allowed():
+    """
+    Generic implementation prefixes like 'yaml:' must NOT be allowed
+    for src/config_format changes.
+
+    This prevents leaking format-specific implementation details into
+    commit history.
+    """
+    commit = make_commit(
+        "yaml: fix include resolution\n\nSigned-off-by: User",
+        ["src/config_format/flb_cf_yaml.c"]
+    )
+    ok, msg = validate_commit(commit)
+    assert ok is False
+    assert "config_format:" in msg
+
+
+def test_valid_config_format_multiple_files():
+    """
+    Modifying multiple files under src/config_format should still require
+    the 'config_format:' umbrella prefix.
+    """
+    commit = make_commit(
+        "config_format: refactor include handling\n\nSigned-off-by: User",
+        [
+            "src/config_format/flb_cf_yaml.c",
+            "src/config_format/flb_cf_fluentbit.c",
+        ]
     )
     ok, _ = validate_commit(commit)
     assert ok is True

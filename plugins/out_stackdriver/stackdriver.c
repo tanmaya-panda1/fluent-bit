@@ -2,7 +2,7 @@
 
 /*  Fluent Bit
  *  ==========
- *  Copyright (C) 2015-2024 The Fluent Bit Authors
+ *  Copyright (C) 2015-2026 The Fluent Bit Authors
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -396,7 +396,7 @@ static flb_sds_t get_google_token(struct flb_stackdriver *ctx)
     /* Copy string to prevent race conditions (get_oauth2 can free the string) */
     if (ret == 0) {
         /* Update pthread keys cached values */
-        oauth2_cache_set(ctx->o->token_type, ctx->o->access_token, ctx->o->expires);
+        oauth2_cache_set(ctx->o->token_type, ctx->o->access_token, ctx->o->expires_at);
 
         /* Compose outgoing buffer using cached values */
         output = oauth2_cache_to_token();
