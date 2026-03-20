@@ -120,9 +120,6 @@ static int azure_kusto_get_service_principal_token(struct flb_azure_kusto *ctx)
         flb_plg_error(ctx->ins, "error appending oauth2 params");
         return -1;
     }
-    /* Enable OAuth2 for token retrieval */
-    ctx->o->cfg.enabled = FLB_TRUE;  
-
     /* Retrieve access token */
     char *token = flb_oauth2_token_get(ctx->o);
     if (!token) {
@@ -448,6 +445,7 @@ static int ingest_all_chunks(struct flb_azure_kusto *ctx, struct flb_config *con
     struct mk_list *tmp;
     struct mk_list *head;
     struct mk_list *f_head;
+    struct mk_list *f_tmp;
     struct flb_fstore_file *fsf;
     struct flb_fstore_stream *fs_stream;
     flb_sds_t payload = NULL;
@@ -465,9 +463,14 @@ static int ingest_all_chunks(struct flb_azure_kusto *ctx, struct flb_config *con
             continue;
         }
 
-        mk_list_foreach_safe(f_head, tmp, &fs_stream->files) {
+        mk_list_foreach_safe(f_head, f_tmp, &fs_stream->files) {
             fsf = mk_list_entry(f_head, struct flb_fstore_file, _head);
             chunk = fsf->data;
+
+            /* Skip files with no associated chunk data (may happen during shutdown) */
+            if (chunk == NULL) {
+                continue;
+            }
 
             /* Locked chunks are being processed, skip */
             if (chunk->locked == FLB_TRUE) {

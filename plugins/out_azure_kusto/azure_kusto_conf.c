@@ -564,14 +564,48 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
     flb_plg_debug(ctx->ins, "difference is  %llu", now - ctx->resources->load_time);
     flb_plg_debug(ctx->ins, "effective ingestion resource interval is %d", ctx->ingestion_resources_refresh_interval * 1000 + generated_random_integer);
 
+    /* Acquire the mutex for the staleness check to prevent concurrent coroutines
+     * from both deciding to reload and rotate resources simultaneously.
+     * Without this, two flushes can race: the second rotation destroys old_blob_ha
+     * which is still being used by the first flush's in-flight blob upload,
+     * causing a use-after-free SIGSEGV in cmt_gauge_inc.
+     */
+    if (pthread_mutex_lock(&ctx->resources_mutex)) {
+        flb_plg_error(ctx->ins, "error locking resources mutex for staleness check");
+        return -1;
+    }
+
     /* check if we have all resources and they are not stale */
     if (ctx->resources->blob_ha && ctx->resources->queue_ha &&
         ctx->resources->identity_token &&
         now - ctx->resources->load_time < ctx->ingestion_resources_refresh_interval * 1000 + generated_random_integer) {
         flb_plg_debug(ctx->ins, "resources are already loaded and are not stale");
+        pthread_mutex_unlock(&ctx->resources_mutex);
         ret = 0;
     }
+    else if (ctx->resources->loading_in_progress) {
+        /*
+         * Another coroutine is already loading resources. Return error to
+         * trigger FLB_RETRY so this flush will be retried once the resources
+         * are available. This prevents concurrent rotations that caused
+         * use-after-free SIGSEGV.
+         */
+        flb_plg_info(ctx->ins, "ingestion resources loading already in progress by another coroutine, will retry");
+        pthread_mutex_unlock(&ctx->resources_mutex);
+        /* Return -1 directly without going through cleanup, since cleanup
+         * would reset load_time and loading_in_progress which belong to
+         * the coroutine that is actually doing the loading.
+         */
+        return -1;
+    }
     else {
+        /*
+         * Mark loading in progress (while holding mutex) to prevent other
+         * concurrent coroutines from also starting a reload.
+         */
+        ctx->resources->loading_in_progress = FLB_TRUE;
+        /* Release the mutex before making network calls (which may yield the coroutine) */
+        pthread_mutex_unlock(&ctx->resources_mutex);
         flb_plg_info(ctx->ins, "loading kusto ingestion resources and refresh interval is %d", ctx->ingestion_resources_refresh_interval * 1000 + generated_random_integer);
         response = execute_ingest_csl_command(ctx, ".get ingestion resources");
 
@@ -652,11 +686,19 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
                                 flb_plg_info(ctx->ins, "ingestion resources rotated successfully, "
                                              "previous resources moved to deferred cleanup");
 
+                                /* Clear the loading flag on success */
+                                ctx->resources->loading_in_progress = FLB_FALSE;
                                 ret = 0;
                             }
                             else {
                                 flb_plg_error(ctx->ins,
                                               "error parsing ingestion identity token");
+                                /*
+                                 * Must unlock the mutex before goto cleanup to avoid
+                                 * deadlock (cleanup also acquires the mutex to reset
+                                 * load_time). This was a pre-existing bug.
+                                 */
+                                pthread_mutex_unlock(&ctx->resources_mutex);
                                 ret = -1;
                                 goto cleanup;
                             }
@@ -714,6 +756,16 @@ int azure_kusto_load_ingestion_resources(struct flb_azure_kusto *ctx,
 
     cleanup:
     if (ret == -1) {
+        /*
+         * Reset load_time to 0 so the next call will retry the reload.
+         * We set load_time = now at the start to prevent concurrent reloads,
+         * but if the reload failed, we need to allow future retries.
+         */
+        if (pthread_mutex_lock(&ctx->resources_mutex) == 0) {
+            ctx->resources->load_time = 0;
+            ctx->resources->loading_in_progress = FLB_FALSE;
+            pthread_mutex_unlock(&ctx->resources_mutex);
+        }
         if (queue_ha) {
             flb_upstream_ha_destroy(queue_ha);
         }
