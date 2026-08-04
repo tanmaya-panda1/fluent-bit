@@ -77,7 +77,9 @@ char *flb_azure_msiauth_token_get(struct flb_oauth2 *ctx)
          flb_info("[azure msi auth] HTTP Status=%i", c->resp.status);
          if (c->resp.payload_size > 0) {
              if (c->resp.status == 200) {
-                 flb_debug("[azure msi auth] payload:\n%s", c->resp.payload);
+                 /* the payload carries the access token, never log its content */
+                 flb_debug("[azure msi auth] token response received (%zu bytes)",
+                           c->resp.payload_size);
              }
              else {
                  flb_info("[azure msi auth] payload:\n%s", c->resp.payload);
